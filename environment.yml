@@ -1,0 +1,52 @@
+name: freqtrade-data-service
+channels:
+  - conda-forge
+  - defaults
+
+dependencies:
+  # Python
+  - python=3.11
+
+  # Core web framework
+  - pip
+
+  # System dependencies that conda handles better
+  - numpy
+  - pandas
+
+  # Install via pip (in pip section below)
+  - pip:
+    # Core
+    - fastapi
+    - uvicorn[standard]
+    - pydantic
+    - pydantic-settings
+    - python-dotenv
+
+    # WebSocket and async
+    - websockets
+    - aiohttp
+
+    # Official Exchange connectors (替代 ccxt)
+    - binance-connector
+    - python-okx
+    - pybit
+
+    # Database
+    - clickhouse-driver
+    - aiochclient
+
+    # Data processing
+    - orjson
+
+    # Logging
+    - loguru
+
+    # Utils
+    - httpx
+    - python-dateutil
+
+    # Development
+    - pytest
+    - pytest-asyncio
+    - black

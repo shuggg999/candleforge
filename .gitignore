@@ -1,0 +1,90 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+pip-wheel-metadata/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# Virtual environments
+.env
+.venv
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+
+# Conda environments
+.conda/
+
+# Docker
+*.log
+docker-compose.override.yml
+
+# Data
+data/
+*.db
+*.sqlite
+
+# Logs
+logs/
+*.log
+
+# Config files with secrets
+.env
+.env.local
+.env.production
+config/local.yaml
+config/secrets.yaml
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Test
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Backup and temporary files  
+*.bak
+*.backup
+*.tmp
+*.temp
+backup/
+
+# ClickHouse data
+clickhouse/
+*.pid
+*.lock
+
+# Runtime data
+*.json.log
+data_quality_report.json
+monitor.log
+
+# OS specific
+Thumbs.db
+ehthumbs.db
