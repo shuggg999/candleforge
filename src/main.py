@@ -25,6 +25,10 @@ from src.utils.recovery_manager import auto_recovery
 from src.classification import Classifier
 from src.classification.classifier import adapt_aiochclient
 from src.classification.api import router as classification_router, set_classifier as set_classification_singleton
+from src.detection import Detector, LoggingPublisher
+from src.detection.api import router as detection_router, set_detector as set_detection_singleton
+from src.detection.thresholds import DEFAULT_THRESHOLDS, merge_thresholds, parse_thresholds_env
+from src.scheduler import build_scheduler
 
 
 # Configure logger
@@ -52,6 +56,8 @@ class DataService:
         self.collector_manager: CollectorManager = None
         self.recovery_service: RecoveryService = None
         self.classifier: Optional[Classifier] = None
+        self.detector: Optional[Detector] = None
+        self.scheduler = None
         self.is_running = False
     
     async def startup(self):
@@ -106,6 +112,38 @@ class DataService:
         except Exception as e:
             logger.warning(f"⚠️ Classifier initial refresh failed (non-fatal): {e}")
         set_classification_singleton(self.classifier)
+
+        # Volume anomaly detector + scheduler (add-volume-detection)
+        try:
+            overrides = parse_thresholds_env(settings.DETECTION_THRESHOLDS)
+            thresholds = merge_thresholds(DEFAULT_THRESHOLDS, overrides) if overrides else DEFAULT_THRESHOLDS
+            self.detector = Detector(
+                ch_client=adapt_aiochclient(self.db_manager.client),
+                classifier=self.classifier,
+                publisher=LoggingPublisher(),
+                thresholds=thresholds,
+                baseline_hours=settings.DETECTION_BASELINE_HOURS,
+                current_minutes=settings.DETECTION_CURRENT_MINUTES,
+                min_samples=settings.DETECTION_MIN_SAMPLES,
+                interval_minutes=settings.DETECTION_INTERVAL_MINUTES,
+                exchange="binance",
+            )
+            set_detection_singleton(self.detector)
+            logger.info("📊 Volume anomaly detector initialized")
+
+            # NOTE: cold-start backfill skipped by default (本地 dev 连不到 Binance);
+            # production deploy on Jarvis will set BACKFILL_ON_STARTUP and call ensure_baseline_data.
+
+            self.scheduler = build_scheduler(
+                classifier=self.classifier,
+                detector=self.detector,
+                detection_interval_minutes=settings.DETECTION_INTERVAL_MINUTES,
+                classification_refresh_hours=settings.CLASSIFICATION_REFRESH_HOURS,
+            )
+            self.scheduler.start()
+            logger.info("⏰ Scheduler started (detection cycle + classification refresh)")
+        except Exception as e:
+            logger.warning(f"⚠️ Detection bootstrap failed (non-fatal): {e}")
 
         self.is_running = True
         logger.info("✅ Data Service is ready!")
@@ -220,6 +258,14 @@ class DataService:
         logger.info("🛑 Shutting down Data Service...")
         self.is_running = False
 
+        # Detection scheduler (add-volume-detection)
+        if self.scheduler:
+            try:
+                self.scheduler.shutdown(wait=True)
+            except Exception as e:
+                logger.warning(f"Scheduler shutdown error: {e}")
+        set_detection_singleton(None)
+
         # Volume tier classifier
         if self.classifier:
             try:
@@ -310,6 +356,9 @@ app.include_router(freqtrade_router, prefix="/api/v1")
 # Include volume classification routes (prefix is set inside the router)
 app.include_router(classification_router)
 
+# Include volume detection routes
+app.include_router(detection_router)
+
 
 @app.get("/")
 async def root():
@@ -362,6 +411,18 @@ async def health_check():
             }
         status["classification"] = classification_health
         if classification_health["status"] != "ok":
+            health_status = "degraded"
+
+        # Detection sub-probe (add-volume-detection)
+        if service.detector is not None:
+            detection_health = service.detector.health()
+        else:
+            detection_health = {
+                "status": "failed",
+                "reason": "detector not initialized",
+            }
+        status["detection"] = detection_health
+        if detection_health["status"] != "ok":
             health_status = "degraded"
 
         return JSONResponse(

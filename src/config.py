@@ -120,6 +120,18 @@ class Settings(BaseSettings):
         env="CLASSIFICATION_REFRESH_HOURS",
         description="How often the classifier recomputes tier P25/P50/P75 thresholds (hours)",
     )
+
+    # Volume Detection (add-volume-detection)
+    DETECTION_INTERVAL_MINUTES: int = Field(default=5, env="DETECTION_INTERVAL_MINUTES")
+    DETECTION_THRESHOLDS: str = Field(
+        default="",
+        env="DETECTION_THRESHOLDS",
+        description="Override threshold table; form 'tier:warn,strong,extreme;...'",
+    )
+    DETECTION_BASELINE_HOURS: int = Field(default=24, env="DETECTION_BASELINE_HOURS")
+    DETECTION_CURRENT_MINUTES: int = Field(default=5, env="DETECTION_CURRENT_MINUTES")
+    DETECTION_MIN_SAMPLES: int = Field(default=1200, env="DETECTION_MIN_SAMPLES")
+    BACKFILL_BATCH_RPS: float = Field(default=10.0, env="BACKFILL_BATCH_RPS")
     
     class Config:
         env_file = ".env"

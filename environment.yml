@@ -64,3 +64,9 @@ dependencies:
 
     # System monitoring
     - psutil
+
+    # Scheduling (volume-detection)
+    - apscheduler>=3.10,<4.0
+
+    # Test infra (testcontainers for integration tests)
+    - testcontainers[clickhouse]>=4.0,<5.0
