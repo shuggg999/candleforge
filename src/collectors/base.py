@@ -46,7 +46,7 @@ class ExchangeCollector(ABC):
         # Configuration
         self.timeframes = ["1m", "5m", "15m", "1h", "4h", "1d"]
         self.symbols: List[str] = []
-        self.max_retries = 5
+        self.max_retries = 999999  # Infinite retries for WebSocket connections
         self.base_delay = 1.0
         self.max_symbols_per_connection = 200  # Most exchanges limit this
         
@@ -295,16 +295,22 @@ class ExchangeCollector(ABC):
         client = self.websocket_clients.get(client_key)
         if not client:
             return
-        
-        while self.is_running:
-            try:
-                # This will be implemented differently for each exchange
-                # Some use callbacks, others use async iteration
-                await self.handle_websocket_message(client_key, None)
-                
-            except Exception as e:
-                logger.error(f"Message loop error for {client_key}: {e}")
-                break
+
+        try:
+            while self.is_running:
+                # Receive message from WebSocket
+                raw_message = await client.recv()
+
+                if not raw_message:
+                    continue
+
+                # Handle the message
+                await self.handle_websocket_message(client_key, raw_message)
+
+        except Exception as e:
+            logger.warning(f"Message loop ended for {client_key}: {e}")
+            # Don't break here - let connection manager handle reconnection
+            raise
     
     async def process_and_store_ohlcv(self, ohlcv_data: Dict[str, Any], client_key: str = "unknown"):
         """Process standardized OHLCV data and store to database"""

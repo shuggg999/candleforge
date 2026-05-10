@@ -33,8 +33,10 @@ logger.add(
 )
 logger.add(
     "logs/data_service.log",
-    rotation="1 day",
+    rotation="50 MB",  # 改为大小轮转，避免单文件过大
     retention="7 days",
+    compression="gz",  # 启用压缩
+    enqueue=True,      # 异步写入，避免阻塞
     level=settings.LOG_LEVEL
 )
 
@@ -84,8 +86,9 @@ class DataService:
         logger.info("▶️ Starting data collectors...")
         await self.collector_manager.start_all()
         
-        # Start recovery service
-        asyncio.create_task(self.recovery_service.start())
+        # Start recovery service - TEMPORARILY DISABLED
+        # asyncio.create_task(self.recovery_service.start())
+        logger.info("⚠️ Recovery service temporarily disabled")
         
         self.is_running = True
         logger.info("✅ Data Service is ready!")
@@ -275,6 +278,10 @@ app.add_middleware(
 
 # Include API routes
 app.include_router(routes.router, prefix="/api/v1")
+
+# Include Freqtrade-compatible API routes
+from src.api.freqtrade import router as freqtrade_router
+app.include_router(freqtrade_router, prefix="/api/v1")
 
 
 @app.get("/")

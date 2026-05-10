@@ -1,0 +1,156 @@
+# 数据收集器配置文件
+# 增强版数据收集架构配置
+
+# 全局配置
+global:
+  # 数据收集设置
+  min_data_points: 100
+  enable_data_validation: true
+  rate_limit: 10.0
+  
+  # 并发控制
+  max_concurrent: 10
+  delay_between_requests: 0.1
+  
+  # 重试设置
+  max_retry_count: 3
+  retry_backoff_factor: 1.5
+  
+  # WebSocket配置
+  websocket:
+    enabled: true
+    reconnect_interval: 30
+    max_reconnect_attempts: 5
+    
+  # REST API配置
+  rest_api:
+    enabled: true
+    timeout: 30
+    max_connections: 100
+
+# 交易所特定配置
+collectors:
+  binance:
+    exchange_name: "binance"
+    base_url: "https://api.binance.com"
+    futures_base_url: "https://fapi.binance.com"
+    ws_base_url: "wss://fstream.binance.com/ws/"
+    max_symbols_per_connection: 100
+    
+    config:
+      # 重写全局配置
+      max_concurrent: 15
+      rate_limit: 20.0
+      
+      # WebSocket特定设置
+      websocket:
+        enabled: true
+        stream_buffer_size: 1000
+        reconnect_interval: 15
+        
+      # 数据验证设置
+      validation:
+        enable_outlier_detection: true
+        outlier_threshold: 3.0
+        auto_fix: true
+        min_price: 0.00001
+        max_price: 1000000.0
+        min_volume: 0.0
+      
+  okx:
+    exchange_name: "okx"
+    base_url: "https://www.okx.com"
+    ws_base_url: "wss://ws.okx.com:8443/ws/v5/public"
+    max_symbols_per_connection: 80
+    
+    config:
+      max_concurrent: 12
+      rate_limit: 15.0
+      
+      websocket:
+        enabled: true
+        stream_buffer_size: 800
+        reconnect_interval: 20
+        
+      validation:
+        enable_outlier_detection: true
+        outlier_threshold: 2.5
+        auto_fix: true
+        min_price: 0.00001
+        max_price: 1000000.0
+        min_volume: 0.0
+        
+  bybit:
+    exchange_name: "bybit"
+    base_url: "https://api.bybit.com"
+    ws_base_url: "wss://stream.bybit.com/realtime"
+    max_symbols_per_connection: 60
+    
+    config:
+      max_concurrent: 8
+      rate_limit: 12.0
+      
+      websocket:
+        enabled: true
+        stream_buffer_size: 600
+        reconnect_interval: 25
+        
+      validation:
+        enable_outlier_detection: true
+        outlier_threshold: 3.5
+        auto_fix: true
+        min_price: 0.00001
+        max_price: 1000000.0
+        min_volume: 0.0
+
+# 数据验证全局规则
+validation:
+  price_columns: ["open", "high", "low", "close"]
+  required_columns: ["timestamp", "open", "high", "low", "close", "volume"]
+  
+  # 数据范围检查
+  ranges:
+    min_price: 0.00001
+    max_price: 1000000.0
+    min_volume: 0.0
+    max_volume: 1000000000.0
+    
+  # 异常值检测
+  outlier_detection:
+    enabled: true
+    default_threshold: 3.0
+    methods: ["iqr", "modified_zscore"]
+    
+  # 时间序列验证
+  timeseries:
+    check_gaps: true
+    max_gap_minutes: 5
+    fill_method: "interpolate"
+    
+# 监控和统计
+monitoring:
+  enable_stats_collection: true
+  stats_report_interval: 300  # 5分钟
+  
+  # 性能监控
+  performance:
+    track_memory_usage: true
+    track_cpu_usage: true
+    track_network_latency: true
+    
+  # 错误监控
+  error_tracking:
+    enabled: true
+    max_error_history: 1000
+    alert_threshold: 10  # 10个错误触发告警
+    
+# 日志配置
+logging:
+  level: "INFO"
+  format: "{time} | {level} | {name} | {message}"
+  
+  # 日志文件
+  files:
+    collectors: "logs/collectors.log"
+    validation: "logs/validation.log"
+    errors: "logs/errors.log"

@@ -41,7 +41,7 @@ class LogManager:
         
         # 日志类型和文件名映射
         self.log_patterns = {
-            'service': 'freqtrade-data-service*.log',
+            'service': 'data_service*.log',  # 修复：匹配实际文件名
             'access': 'access*.log',
             'error': 'error*.log',
             'collector': 'collector*.log',

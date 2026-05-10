@@ -59,12 +59,12 @@ class Settings(BaseSettings):
     
     # Recovery Settings
     RECOVERY_CHECK_INTERVAL: int = Field(
-        default=60,  # Check every minute for faster gap detection
+        default=60,  # Check every minute for gaps
         env="RECOVERY_CHECK_INTERVAL",
         description="Check interval in seconds"
     )
     MAX_GAP_MINUTES: int = Field(
-        default=240,  # Allow filling larger gaps (4 hours)
+        default=720,  # Allow filling larger gaps (12 hours)
         env="MAX_GAP_MINUTES",
         description="Maximum gap to fill via REST API"
     )

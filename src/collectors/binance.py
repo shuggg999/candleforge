@@ -127,15 +127,18 @@ class BinanceCollector(ExchangeCollector):
                 # 🔧 CRITICAL: Use open time (t) instead of close time (T) for consistency
                 # This ensures WebSocket and REST API data have the same timestamp
                 kline_open_time = datetime.fromtimestamp(int(kline['t']) / 1000, timezone.utc)
-                
+
                 # Normalize timestamp to exact timeframe boundary
                 kline_open_time = self._normalize_timestamp(kline_open_time, self._parse_timeframe(kline['i']))
-                
+
+                # Convert to milliseconds timestamp for Freqtrade compatibility
+                timestamp_ms = int(kline_open_time.timestamp() * 1000)
+
                 return {
                     'exchange': self.exchange_id,
                     'symbol': symbol_standard,
                     'timeframe': self._parse_timeframe(kline['i']),
-                    'timestamp': kline_open_time,  # Use normalized open time
+                    'timestamp': timestamp_ms,  # Milliseconds timestamp for Freqtrade
                     'open': float(kline['o']),
                     'high': float(kline['h']),
                     'low': float(kline['l']),
@@ -145,7 +148,8 @@ class BinanceCollector(ExchangeCollector):
                     'trades_count': int(kline['n']),
                     'buy_volume': float(kline['V']),  # Taker buy base asset volume
                     'open_interest': None,  # Not available in kline data
-                    'funding_rate': None    # Not available in kline data
+                    'funding_rate': None,    # Not available in kline data
+                    'data_quality': 'websocket'  # Mark as WebSocket data
                 }
             
             return None
@@ -206,41 +210,23 @@ class BinanceCollector(ExchangeCollector):
         # Binance handles subscription via URL parameters, so this is a no-op
         logger.info(f"📡 Subscribed {client_key} to {len(symbols)} symbols, {len(timeframes)} timeframes")
     
-    async def handle_websocket_message(self, client_key: str, message: Any):
-        """Handle incoming WebSocket messages"""
-        websocket = self.websocket_clients.get(client_key)
-        if not websocket:
-            return
-        
+    async def handle_websocket_message(self, client_key: str, raw_message: str):
+        """Handle a single WebSocket message - called by base class message loop"""
         try:
-            while self.is_running:
-                # Receive message from WebSocket
-                raw_message = await websocket.recv()
-                
-                if not raw_message:
-                    continue
-                
-                try:
-                    # Parse JSON message
-                    message_data = json.loads(raw_message)
-                    
-                    # Parse OHLCV data
-                    ohlcv_data = self.parse_ohlcv_message(message_data)
-                    
-                    if ohlcv_data:
-                        # Store the data
-                        await self.process_and_store_ohlcv(ohlcv_data)
-                        
-                except json.JSONDecodeError as e:
-                    logger.warning(f"Invalid JSON message from {client_key}: {e}")
-                except Exception as e:
-                    logger.error(f"Error processing message from {client_key}: {e}")
-                    
-        except websockets.exceptions.ConnectionClosed:
-            logger.warning(f"WebSocket connection {client_key} closed")
+            # Parse JSON message
+            message_data = json.loads(raw_message)
+
+            # Parse OHLCV data
+            ohlcv_data = self.parse_ohlcv_message(message_data)
+
+            if ohlcv_data:
+                # Store the data
+                await self.process_and_store_ohlcv(ohlcv_data)
+
+        except json.JSONDecodeError as e:
+            logger.warning(f"Invalid JSON message from {client_key}: {e}")
         except Exception as e:
-            logger.error(f"WebSocket message handling error for {client_key}: {e}")
-            raise
+            logger.error(f"Error processing message from {client_key}: {e}")
     
     async def close_websocket_connection(self, client_key: str):
         """Close a specific WebSocket connection"""
@@ -297,12 +283,15 @@ class BinanceCollector(ExchangeCollector):
                 # 🔧 CRITICAL: Normalize timestamp to exact timeframe boundary
                 kline_open_time = datetime.fromtimestamp(int(kline[0]) / 1000, timezone.utc)
                 kline_open_time = self._normalize_timestamp(kline_open_time, timeframe)
-                
+
+                # Convert to milliseconds timestamp for Freqtrade compatibility
+                timestamp_ms = int(kline_open_time.timestamp() * 1000)
+
                 data = {
                     'exchange': self.exchange_id,
                     'symbol': symbol,  # Use standard format
                     'timeframe': timeframe,
-                    'timestamp': kline_open_time,  # Use normalized open time
+                    'timestamp': timestamp_ms,  # Milliseconds timestamp for Freqtrade
                     'open': float(kline[1]),
                     'high': float(kline[2]),
                     'low': float(kline[3]),
@@ -313,6 +302,7 @@ class BinanceCollector(ExchangeCollector):
                     'buy_volume': float(kline[9]),
                     'open_interest': None,
                     'funding_rate': None,
+                    'data_quality': 'rest_api'  # Mark as REST API data
                 }
                 historical_data.append(data)
                 

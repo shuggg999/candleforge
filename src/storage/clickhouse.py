@@ -24,11 +24,11 @@ class ClickHouseManager:
         self.session: Optional[ClientSession] = None
         self.is_connected = False
         
-        # 🚀 Optimized batch processing settings
-        self._write_queue = asyncio.Queue(maxsize=20000)  # Increased queue size
-        self._batch_size = 1000  # Larger batch size for better throughput
-        self._batch_timeout = 1.5   # Optimized timeout
-        self._max_concurrent_batches = 3  # Allow concurrent batch processing
+        # 🎯 Memory-Optimized batch processing settings
+        self._write_queue = asyncio.Queue(maxsize=500)   # Reduced from 20000 to 500 (大幅减少内存占用)
+        self._batch_size = 100   # Reduced from 1000 to 100 (更小批次，更快处理)
+        self._batch_timeout = 0.5   # Reduced from 1.5 to 0.5 (更快写入)
+        self._max_concurrent_batches = 1  # Reduced from 3 to 1 (避免并发竞争)
         self._write_task: Optional[asyncio.Task] = None
         self._batch_semaphore = asyncio.Semaphore(self._max_concurrent_batches)
         
@@ -54,8 +54,8 @@ class ClickHouseManager:
         # Time zone settings
         self._beijing_tz = zoneinfo.ZoneInfo("Asia/Shanghai")
         
-        # 🔧 Connection pool optimization
-        self._connection_pool_size = 10
+        # 🎯 Memory-Optimized connection pool (Reduced from 10 to 2)
+        self._connection_pool_size = 2  # 显著减少连接池大小
         self._compression_enabled = True
     
     def _convert_to_beijing_time(self, dt: datetime) -> datetime:
@@ -73,14 +73,14 @@ class ClickHouseManager:
     async def initialize(self):
         """Initialize ClickHouse connection and start batch writer"""
         try:
-            # 🚀 Create optimized HTTP session with connection pooling
-            timeout = ClientTimeout(total=45, connect=15, sock_read=30)
+            # 🎯 Memory-Optimized HTTP session with minimal connection pooling
+            timeout = ClientTimeout(total=30, connect=10, sock_read=20)  # 减少超时时间
             connector = aiohttp.TCPConnector(
-                limit=self._connection_pool_size,
+                limit=self._connection_pool_size,  # 现在是2个连接
                 limit_per_host=self._connection_pool_size,
                 enable_cleanup_closed=True,
-                keepalive_timeout=60,
-                ttl_dns_cache=300
+                keepalive_timeout=30,  # 减少keepalive时间从60到30秒
+                ttl_dns_cache=60       # 减少DNS缓存时间从300到60秒
             )
             self.session = ClientSession(
                 timeout=timeout,
@@ -188,12 +188,18 @@ class ClickHouseManager:
     async def insert_ohlcv(self, data: Dict[str, Any]):
         """Queue OHLCV data for batch insertion"""
         try:
+            # Log data flow for debugging
+            logger.info(f"📝 insert_ohlcv called, original created_at: {data.get('created_at', 'NOT_PROVIDED')}")
+
             # Validate data before queuing
             validated_data = DataValidator.validate_ohlcv(data)
+
+            # Log validated data
+            logger.info(f"✅ After validation created_at: {validated_data.get('created_at', 'ERROR')}")
             
-            # Convert timestamp to Beijing time
-            if 'timestamp' in validated_data and isinstance(validated_data['timestamp'], datetime):
-                validated_data['timestamp'] = self._convert_to_beijing_time(validated_data['timestamp'])
+            # Timestamp is now stored as milliseconds (UInt64) - no conversion needed
+            # if 'timestamp' in validated_data and isinstance(validated_data['timestamp'], datetime):
+            #     validated_data['timestamp'] = self._convert_to_beijing_time(validated_data['timestamp'])
             
             # Add to write queue (non-blocking)
             try:
@@ -280,10 +286,9 @@ class ClickHouseManager:
             # 🔧 Prepare optimized batch for insertion
             values = []
             for item in batch:
-                # Ensure timestamps are in the correct format
+                # Timestamp is now stored as milliseconds (UInt64) - use directly
                 timestamp = item['timestamp']
-                if hasattr(timestamp, 'replace'):
-                    timestamp = timestamp.replace(tzinfo=None, microsecond=timestamp.microsecond // 1000 * 1000)
+                # No datetime processing needed - timestamp is already in milliseconds
                 
                 created_at = item['created_at']
                 if hasattr(created_at, 'replace'):

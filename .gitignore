@@ -88,3 +88,6 @@ monitor.log
 # OS specific
 Thumbs.db
 ehthumbs.db
+
+# Claude Code / OpenSpec workspace (user-private)
+.claude/settings.local.json
