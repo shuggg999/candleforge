@@ -27,7 +27,7 @@ orjson==3.9.10
 loguru==0.7.2
 
 # Utils
-httpx==0.25.2
+httpx[socks]==0.25.2
 python-dateutil==2.8.2
 
 # Development & Testing

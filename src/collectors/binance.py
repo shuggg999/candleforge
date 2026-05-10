@@ -32,9 +32,15 @@ class BinanceCollector(ExchangeCollector):
     async def initialize_clients(self):
         """Initialize Binance REST and WebSocket clients"""
         try:
-            # Create HTTP client for API requests
-            self.http_client = httpx.AsyncClient(timeout=30.0)
-            
+            # Create HTTP client (optionally via proxy — set BINANCE_PROXY_URL on hosts
+            # that can't reach Binance directly, e.g. socks5h://host.docker.internal:10808)
+            proxy = settings.BINANCE_PROXY_URL or None
+            if proxy:
+                logger.info(f"🌐 Binance HTTP client using proxy: {proxy}")
+                self.http_client = httpx.AsyncClient(proxy=proxy, timeout=30.0)
+            else:
+                self.http_client = httpx.AsyncClient(timeout=30.0)
+
             # Test REST connection by getting exchange info using direct HTTP
             exchange_info_url = f"{self.futures_base_url}/fapi/v1/exchangeInfo"
             response = await self.http_client.get(exchange_info_url)
@@ -61,7 +67,7 @@ class BinanceCollector(ExchangeCollector):
                 logger.info("🌐 Using public HTTP client only")
                 
         except Exception as e:
-            logger.error(f"❌ Failed to initialize Binance clients: {e}")
+            logger.error(f"❌ Failed to initialize Binance clients: {type(e).__name__}: {e}")
             raise
     
     async def get_futures_symbols(self) -> List[str]:

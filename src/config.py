@@ -133,6 +133,11 @@ class Settings(BaseSettings):
     DETECTION_MIN_SAMPLES: int = Field(default=1200, env="DETECTION_MIN_SAMPLES")
     BACKFILL_BATCH_RPS: float = Field(default=10.0, env="BACKFILL_BATCH_RPS")
 
+    # Network proxy for outbound calls to Binance (REST + WebSocket).
+    # Empty = direct connection. For deployments behind a SOCKS5 proxy, set e.g.
+    # BINANCE_PROXY_URL=socks5h://host.docker.internal:10808
+    BINANCE_PROXY_URL: str = Field(default="", env="BINANCE_PROXY_URL")
+
     # Telegram Alerts (add-telegram-alerts)
     TELEGRAM_BOT_TOKEN: str = Field(default="", env="TELEGRAM_BOT_TOKEN")
     TELEGRAM_CHAT_ID: str = Field(default="", env="TELEGRAM_CHAT_ID")
