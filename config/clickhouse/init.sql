@@ -97,6 +97,28 @@ ENGINE = MergeTree()
 ORDER BY timestamp
 TTL timestamp + INTERVAL 30 DAY;
 
+-- Volume anomaly alerts audit (add-telegram-alerts), 365-day TTL
+CREATE TABLE IF NOT EXISTS volume_alerts (
+    detected_at DateTime64(3) COMMENT 'Detection cycle timestamp (UTC)',
+    exchange LowCardinality(String) COMMENT 'binance/okx/bybit',
+    symbol String COMMENT 'Trading pair, e.g. BTC/USDT',
+    tier LowCardinality(String) COMMENT 'mega/large/mid/small',
+    level LowCardinality(String) COMMENT 'warn/strong/extreme',
+    prev_level LowCardinality(String) COMMENT 'normal/warn/strong/extreme/none',
+    ratio Float64 COMMENT 'current_avg / baseline_median',
+    curr_5min_avg Float64 COMMENT 'mean volume over the last current_minutes window',
+    baseline_median Float64 COMMENT 'median volume over baseline_hours',
+    threshold_used Float64 COMMENT 'tier threshold value that was crossed',
+    telegram_status LowCardinality(String) DEFAULT 'pending' COMMENT 'pending/sent/failed/skipped',
+    telegram_error String DEFAULT '' COMMENT 'last error message if failed',
+    sent_at Nullable(DateTime64(3)) COMMENT 'when Telegram acknowledged the send'
+)
+ENGINE = MergeTree()
+PARTITION BY toYYYYMM(detected_at)
+ORDER BY (detected_at, exchange, symbol)
+TTL toDateTime(detected_at) + INTERVAL 365 DAY
+SETTINGS index_granularity = 8192;
+
 -- Symbol tier classification snapshots (volume-based, refreshed every 12h)
 CREATE TABLE IF NOT EXISTS symbol_tiers (
     exchange String COMMENT 'Exchange name (binance/okx/bybit)',

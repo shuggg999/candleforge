@@ -29,6 +29,8 @@ from src.detection import Detector, LoggingPublisher
 from src.detection.api import router as detection_router, set_detector as set_detection_singleton
 from src.detection.thresholds import DEFAULT_THRESHOLDS, merge_thresholds, parse_thresholds_env
 from src.scheduler import build_scheduler
+from src.alerts import Notifier, TelegramClient
+from src.alerts.api import router as alerts_router, set_notifier as set_alerts_singleton
 
 
 # Configure logger
@@ -57,6 +59,7 @@ class DataService:
         self.recovery_service: RecoveryService = None
         self.classifier: Optional[Classifier] = None
         self.detector: Optional[Detector] = None
+        self.notifier: Optional[Notifier] = None
         self.scheduler = None
         self.is_running = False
     
@@ -113,14 +116,39 @@ class DataService:
             logger.warning(f"⚠️ Classifier initial refresh failed (non-fatal): {e}")
         set_classification_singleton(self.classifier)
 
+        # Telegram alerts notifier (add-telegram-alerts) — replaces LoggingPublisher injection
+        try:
+            tg_client = None
+            if settings.TELEGRAM_BOT_TOKEN:
+                tg_client = TelegramClient(
+                    token=settings.TELEGRAM_BOT_TOKEN,
+                    parse_mode=settings.TELEGRAM_PARSE_MODE,
+                )
+            self.notifier = Notifier(
+                ch_client=adapt_aiochclient(self.db_manager.client),
+                telegram_client=tg_client,
+                chat_id=settings.TELEGRAM_CHAT_ID or None,
+                dry_run=settings.ALERTS_DRY_RUN,
+                exchange="binance",
+            )
+            set_alerts_singleton(self.notifier)
+            logger.info(
+                "📨 Telegram notifier initialized (dry_run={})",
+                self.notifier._dry_run,
+            )
+        except Exception as e:
+            logger.warning(f"⚠️ Notifier init failed (falling back to LoggingPublisher): {e}")
+            self.notifier = None
+
         # Volume anomaly detector + scheduler (add-volume-detection)
         try:
             overrides = parse_thresholds_env(settings.DETECTION_THRESHOLDS)
             thresholds = merge_thresholds(DEFAULT_THRESHOLDS, overrides) if overrides else DEFAULT_THRESHOLDS
+            publisher = self.notifier if self.notifier is not None else LoggingPublisher()
             self.detector = Detector(
                 ch_client=adapt_aiochclient(self.db_manager.client),
                 classifier=self.classifier,
-                publisher=LoggingPublisher(),
+                publisher=publisher,
                 thresholds=thresholds,
                 baseline_hours=settings.DETECTION_BASELINE_HOURS,
                 current_minutes=settings.DETECTION_CURRENT_MINUTES,
@@ -265,6 +293,7 @@ class DataService:
             except Exception as e:
                 logger.warning(f"Scheduler shutdown error: {e}")
         set_detection_singleton(None)
+        set_alerts_singleton(None)
 
         # Volume tier classifier
         if self.classifier:
@@ -359,6 +388,9 @@ app.include_router(classification_router)
 # Include volume detection routes
 app.include_router(detection_router)
 
+# Include telegram alerts routes
+app.include_router(alerts_router)
+
 
 @app.get("/")
 async def root():
@@ -423,6 +455,18 @@ async def health_check():
             }
         status["detection"] = detection_health
         if detection_health["status"] != "ok":
+            health_status = "degraded"
+
+        # Alerts sub-probe (add-telegram-alerts)
+        if service.notifier is not None:
+            alerts_health = service.notifier.health()
+        else:
+            alerts_health = {
+                "status": "failed",
+                "reason": "notifier not initialized",
+            }
+        status["alerts"] = alerts_health
+        if alerts_health["status"] != "ok":
             health_status = "degraded"
 
         return JSONResponse(

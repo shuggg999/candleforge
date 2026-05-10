@@ -132,6 +132,12 @@ class Settings(BaseSettings):
     DETECTION_CURRENT_MINUTES: int = Field(default=5, env="DETECTION_CURRENT_MINUTES")
     DETECTION_MIN_SAMPLES: int = Field(default=1200, env="DETECTION_MIN_SAMPLES")
     BACKFILL_BATCH_RPS: float = Field(default=10.0, env="BACKFILL_BATCH_RPS")
+
+    # Telegram Alerts (add-telegram-alerts)
+    TELEGRAM_BOT_TOKEN: str = Field(default="", env="TELEGRAM_BOT_TOKEN")
+    TELEGRAM_CHAT_ID: str = Field(default="", env="TELEGRAM_CHAT_ID")
+    TELEGRAM_PARSE_MODE: str = Field(default="Markdown", env="TELEGRAM_PARSE_MODE")
+    ALERTS_DRY_RUN: bool = Field(default=False, env="ALERTS_DRY_RUN")
     
     class Config:
         env_file = ".env"
