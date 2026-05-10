@@ -5,7 +5,7 @@ import asyncio
 import signal
 import sys
 from contextlib import asynccontextmanager
-from typing import Dict, Any
+from typing import Dict, Any, Optional
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
@@ -22,6 +22,9 @@ from src.collectors.manager import CollectorManager
 from src.services.recovery import RecoveryService
 from src.utils.log_manager import log_manager
 from src.utils.recovery_manager import auto_recovery
+from src.classification import Classifier
+from src.classification.classifier import adapt_aiochclient
+from src.classification.api import router as classification_router, set_classifier as set_classification_singleton
 
 
 # Configure logger
@@ -48,6 +51,7 @@ class DataService:
         self.db_manager: ClickHouseManager = None
         self.collector_manager: CollectorManager = None
         self.recovery_service: RecoveryService = None
+        self.classifier: Optional[Classifier] = None
         self.is_running = False
     
     async def startup(self):
@@ -90,6 +94,19 @@ class DataService:
         # asyncio.create_task(self.recovery_service.start())
         logger.info("⚠️ Recovery service temporarily disabled")
         
+        # Volume tier classifier (add-volume-classification)
+        try:
+            self.classifier = Classifier(
+                ch_client=adapt_aiochclient(self.db_manager.client),
+                refresh_hours=settings.CLASSIFICATION_REFRESH_HOURS,
+                exchange="binance",
+            )
+            await self.classifier.refresh_tiers()
+            logger.info("📐 Volume tier classifier initialized")
+        except Exception as e:
+            logger.warning(f"⚠️ Classifier initial refresh failed (non-fatal): {e}")
+        set_classification_singleton(self.classifier)
+
         self.is_running = True
         logger.info("✅ Data Service is ready!")
     
@@ -202,7 +219,14 @@ class DataService:
         """Cleanup all services"""
         logger.info("🛑 Shutting down Data Service...")
         self.is_running = False
-        
+
+        # Volume tier classifier
+        if self.classifier:
+            try:
+                await self.classifier.shutdown()
+            except Exception as e:
+                logger.warning(f"Classifier shutdown error: {e}")
+
         # 🔄 Stop auto recovery monitoring
         await auto_recovery.stop_monitoring()
         
@@ -283,6 +307,9 @@ app.include_router(routes.router, prefix="/api/v1")
 from src.api.freqtrade import router as freqtrade_router
 app.include_router(freqtrade_router, prefix="/api/v1")
 
+# Include volume classification routes (prefix is set inside the router)
+app.include_router(classification_router)
+
 
 @app.get("/")
 async def root():
@@ -316,15 +343,27 @@ async def health_check():
     """Health check endpoint"""
     try:
         status = await service.get_status()
-        
+
         # Determine overall health
         if not status["running"]:
             raise HTTPException(status_code=503, detail="Service not running")
-        
+
         health_status = "healthy"
         if status["database"] != "healthy":
             health_status = "degraded"
-        
+
+        # Classification sub-probe (add-volume-classification)
+        if service.classifier is not None:
+            classification_health = service.classifier.health()
+        else:
+            classification_health = {
+                "status": "failed",
+                "reason": "classifier not initialized",
+            }
+        status["classification"] = classification_health
+        if classification_health["status"] != "ok":
+            health_status = "degraded"
+
         return JSONResponse(
             status_code=200 if health_status == "healthy" else 503,
             content={

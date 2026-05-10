@@ -113,6 +113,13 @@ class Settings(BaseSettings):
     LOG_LEVEL: str = Field(default="INFO", env="LOG_LEVEL")
     DEBUG: bool = Field(default=False, env="DEBUG")
     MAX_WEBSOCKET_CONNECTIONS: int = Field(default=1000, env="MAX_WEBSOCKET_CONNECTIONS")
+
+    # Volume Classification (add-volume-classification)
+    CLASSIFICATION_REFRESH_HOURS: int = Field(
+        default=12,
+        env="CLASSIFICATION_REFRESH_HOURS",
+        description="How often the classifier recomputes tier P25/P50/P75 thresholds (hours)",
+    )
     
     class Config:
         env_file = ".env"
