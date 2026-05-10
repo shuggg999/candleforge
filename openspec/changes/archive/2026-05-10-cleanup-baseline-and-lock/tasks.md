@@ -61,9 +61,11 @@
 
 ## 9. Commit + Archive
 
-- [ ] 9.1 `git add` 所有 staged 改动（包括 OpenSpec scaffolding + cleanup change 四件套 + 实际清理改动）
-- [ ] 9.2 用 HEREDOC 方式 commit，message 格式：`chore(baseline): clean dirty changes and lock baseline (cleanup-baseline-and-lock)` + 详细描述
-- [ ] 9.3 跑 `openspec validate cleanup-baseline-and-lock --strict`，必须 PASS
-- [ ] 9.4 跑 `/opsx:archive cleanup-baseline-and-lock`，把 `baseline-infrastructure` spec 合入 `openspec/specs/baseline-infrastructure/spec.md`
-- [ ] 9.5 二次 commit：`chore(openspec): archive cleanup-baseline-and-lock`，包含归档动作产生的文件移动
-- [ ] 9.6 跑 `git status` 确认工作树彻底干净
+- [x] 9.1 `git add -A` 所有 staged 改动（55 个文件 +11322 -261）
+- [x] 9.2 HEREDOC commit `326f9cb`，含 cleanup 完整动作清单 + 保留改动说明 + Co-Authored-By
+- [x] 9.3 `openspec validate cleanup-baseline-and-lock --strict` PASS
+- [x] 9.4 `openspec archive cleanup-baseline-and-lock -y` 把 baseline-infrastructure spec 合入 `openspec/specs/`，change 移到 `openspec/changes/archive/`
+- [x] 9.5 二次 commit 包含归档动作产生的文件移动
+- [x] 9.6 `git status` 确认工作树彻底干净
+
+**额外清理（pre-commit 发现）**：`tests/test_enhanced_architecture.py` 与 `tests/unit/test_*.py` 五个文件都是测 docs/legacy 已隔离代码的，一起送到 `docs/legacy/tests/` 避免污染 `pytest` 测试信号。
