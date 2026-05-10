@@ -37,7 +37,8 @@ class BinanceCollector(ExchangeCollector):
             proxy = settings.BINANCE_PROXY_URL or None
             if proxy:
                 logger.info(f"🌐 Binance HTTP client using proxy: {proxy}")
-                self.http_client = httpx.AsyncClient(proxy=proxy, timeout=30.0)
+                # httpx 0.25 uses `proxies=` (single str or dict). Newer 0.27+ uses `proxy=`.
+                self.http_client = httpx.AsyncClient(proxies=proxy, timeout=30.0)
             else:
                 self.http_client = httpx.AsyncClient(timeout=30.0)
 
