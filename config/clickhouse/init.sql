@@ -123,7 +123,7 @@ SETTINGS index_granularity = 8192;
 CREATE TABLE IF NOT EXISTS symbol_tiers (
     exchange String COMMENT 'Exchange name (binance/okx/bybit)',
     symbol String COMMENT 'Trading pair symbol (e.g., BTC/USDT)',
-    refreshed_at DateTime64(3) COMMENT 'Refresh cycle timestamp (UTC); all rows in one cycle share the same value',
+    refreshed_at DateTime64(3) COMMENT 'Refresh cycle timestamp (UTC), all rows in one cycle share the same value',
     tier LowCardinality(String) COMMENT 'Tier label: mega / large / mid / small',
     quote_volume_24h Decimal128(4) COMMENT 'Sum of quote_volume over the past 24h at refresh time (USDT)',
     p25 Decimal128(4) COMMENT 'Global P25 threshold for this cycle (USDT)',
