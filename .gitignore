@@ -39,8 +39,8 @@ venv.bak/
 *.log
 docker-compose.override.yml
 
-# Data
-data/
+# Data (only repo-root /data/ — not src/data/)
+/data/
 *.db
 *.sqlite
 
