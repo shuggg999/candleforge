@@ -94,3 +94,6 @@ ehthumbs.db
 .claude/orchestrator-state.json
 # legacy/duplicate schema (Float64 variant, not used by docker-compose); pending cleanup
 config/clickhouse/init_freqtrade.sql
+# host-specific docker-compose overrides (e.g. port mappings for jarvis vs local)
+docker-compose.override.yml
+docker-compose.override.*.yml
