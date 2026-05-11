@@ -26,7 +26,11 @@ class BinanceCollector(ExchangeCollector):
         # Binance-specific settings
         self.base_url = "https://api.binance.com"  # Public API
         self.futures_base_url = "https://fapi.binance.com"  # Futures API
-        self.ws_base_url = "wss://fstream.binance.com/ws/"
+        # Binance USD-M Futures WS requires the /market/ route prefix; without it the
+        # server completes the handshake but pushes ZERO frames forever (silent broken).
+        # Verified 2026-05-12 with /market/ws/ → frames in 2s; bare /ws/ → 0 frames in 15s.
+        # Spot endpoint (stream.binance.com) does NOT have this requirement.
+        self.ws_base_url = "wss://fstream.binance.com/market/ws/"
         self.max_symbols_per_connection = 100  # Binance limit
     
     async def initialize_clients(self):
