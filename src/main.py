@@ -95,9 +95,18 @@ class DataService:
         from src.api import routes
         routes.set_managers(self.db_manager, self.collector_manager)
         
-        # Start collectors
-        logger.info("▶️ Starting data collectors...")
-        await self.collector_manager.start_all()
+        # Start collectors (WS) — skipped when BINANCE_PROXY_URL is set
+        # (websockets 14.2 asyncio.connect doesn't support SOCKS; recovery
+        # service tops up via REST every 60s, ~60-300s lag, acceptable for
+        # 5-minute detection cycles).
+        if settings.BINANCE_PROXY_URL:
+            logger.info(
+                "⚠️ Skipping collector start_all: BINANCE_PROXY_URL is set; "
+                "data flows in via recovery service REST polling instead"
+            )
+        else:
+            logger.info("▶️ Starting data collectors...")
+            await self.collector_manager.start_all()
         
         # Start recovery service - TEMPORARILY DISABLED
         # asyncio.create_task(self.recovery_service.start())

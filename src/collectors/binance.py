@@ -201,17 +201,6 @@ class BinanceCollector(ExchangeCollector):
             stream_params = "/".join(streams)
             ws_url = f"{self.ws_base_url}{stream_params}"
             
-            # When BINANCE_PROXY_URL is set, the websockets library (12.0/14.2 asyncio
-            # variant) doesn't natively support SOCKS proxies. We skip WS in that case
-            # and let the recovery service top-up via REST every 60s (~60-300s lag,
-            # acceptable for 5-minute detection cycles).
-            if settings.BINANCE_PROXY_URL:
-                logger.info(
-                    f"🔌 Skipping Binance WebSocket {client_key} (proxy set; "
-                    f"data flows through REST recovery instead)"
-                )
-                raise NotImplementedError("WebSocket-over-SOCKS not supported; using REST fallback")
-
             logger.info(f"🔌 Creating Binance WebSocket connection {client_key} with {len(streams)} streams")
 
             # Create WebSocket connection (direct, no proxy)
