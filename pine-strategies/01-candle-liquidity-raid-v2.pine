@@ -1,0 +1,194 @@
+//@version=6
+indicator("蜡烛流动性 v2", overlay=true, max_labels_count=200)
+
+// ========== 显示开关 ==========
+showCandlePatterns = input.bool(true, "显示蜡烛形态信号", group="显示开关")
+showLiquidityZones = input.bool(true, "显示流动性区域(圆点)", group="显示开关")
+showLiquidityRaid = input.bool(true, "显示流动性掠夺", group="显示开关")
+showProtection    = input.bool(true, "显示安全确认", group="显示开关")
+showTable         = input.bool(true, "显示信息面板", group="显示开关")
+
+// ========== 参数 ==========
+liquidityStrength = input.float(1.5, "流动性强度倍数", minval=0.5, maxval=3.0, step=0.1, group="参数")
+heatmapOpacity    = input.int(70, "流动性线透明度", minval=0, maxval=100, group="参数")
+
+// ========== 固化配色（柔和主题） ==========
+bullColor    = #4CAF50  // 多头 - 柔和绿
+bearColor    = #FF5252  // 空头 - 柔和红
+highLiqColor = #FF7043  // 上方流动性 - 柔和橙
+lowLiqColor  = #42A5F5  // 下方流动性 - 柔和蓝
+neutralColor = #9E9E9E  // 中性 - 灰
+warnColor    = #FFC107  // 警告 - 琥珀
+
+// ========== 蜡烛形态检测 ==========
+bodySize = math.abs(close - open)
+bodyAvg  = ta.sma(bodySize, 20)
+wickSize = high - low
+wickAvg  = ta.sma(wickSize, 20)
+isBullish = close > open
+isBearish = close < open
+hasLongUpperWick = high - math.max(close, open) > wickAvg * 0.5
+hasLongLowerWick = math.min(close, open) - low > wickAvg * 0.5
+
+isDoji            = bodySize < bodyAvg * 0.3 and wickSize > wickAvg * 0.8
+isHammer          = isBullish and hasLongLowerWick and (high - math.max(close, open)) < bodySize * 0.3 and bodySize < wickSize * 0.4
+isInvertedHammer  = isBullish and hasLongUpperWick and (math.min(close, open) - low) < bodySize * 0.3 and bodySize < wickSize * 0.4
+isHangingMan      = isBearish and hasLongLowerWick and (high - math.max(close, open)) < bodySize * 0.3 and bodySize < wickSize * 0.4
+isShootingStar    = isBearish and hasLongUpperWick and (math.min(close, open) - low) < bodySize * 0.3 and bodySize < wickSize * 0.4
+isBullishEngulf   = isBullish and open < low[1] and close > high[1]
+isBearishEngulf   = isBearish and open > high[1] and close < low[1]
+
+// 统一映射到 5 种语义化信号
+patternStr   = ""
+patternColor = neutralColor
+if isBullishEngulf
+    patternStr := "买入预警·强"
+    patternColor := bullColor
+else if isHammer or isInvertedHammer
+    patternStr := "买入预警"
+    patternColor := bullColor
+else if isBearishEngulf
+    patternStr := "卖出预警·强"
+    patternColor := bearColor
+else if isHangingMan or isShootingStar
+    patternStr := "卖出预警"
+    patternColor := bearColor
+else if isDoji
+    patternStr := "变盘"
+    patternColor := warnColor
+
+// ========== 流动性区域计算 ==========
+atrVal = ta.atr(14)
+volAvg = ta.sma(volume, 20)
+
+volLiquidity        = ta.sma(volume, 5) > volAvg * liquidityStrength ? 1 : 0
+priceDwellLiquidity = math.abs(close - open) < math.abs(ta.sma(close - open, 10)) * 0.5 ? 1 : 0
+
+srCount = 0
+for i = 1 to 10
+    if math.abs(close[i] - close[i+1]) < atrVal * 0.2
+        srCount += 1
+srLiquidity = srCount >= 3 ? 1 : 0
+
+liquidityScore = volLiquidity * 0.4 + priceDwellLiquidity * 0.3 + srLiquidity * 0.3
+
+upperLiqZone = math.max(high[1], high[2], high[3], high[4])
+lowerLiqZone = math.min(low[1], low[2], low[3], low[4])
+
+upperLiqStrength = ta.highest(volume, 5) > volAvg * liquidityStrength and high > upperLiqZone ? "强" : ta.highest(volume, 5) > volAvg and high > upperLiqZone ? "中" : "弱"
+lowerLiqStrength = ta.highest(volume, 5) > volAvg * liquidityStrength and low < lowerLiqZone ? "强" : ta.highest(volume, 5) > volAvg and low < lowerLiqZone ? "中" : "弱"
+
+priceChange         = close - close[10]
+liquidityDirection  = priceChange > 0 ? "涨" : "跌"
+liquidityPercentage = math.round(liquidityScore * 100)
+
+// ========== 流动性掠夺检测 ==========
+upperLiqRaid  = high > upperLiqZone and close < upperLiqZone and volume > volAvg * 1.2
+lowerLiqRaid  = low < lowerLiqZone and close > lowerLiqZone and volume > volAvg * 1.2
+liquidityRaid = upperLiqRaid or lowerLiqRaid
+
+longStopLoss  = lowerLiqZone - (atrVal * (liquidityScore > 0.7 ? 0.3 : 0.5))
+shortStopLoss = upperLiqZone + (atrVal * (liquidityScore > 0.7 ? 0.3 : 0.5))
+
+riskLevel = liquidityScore >= 0.8 ? "高" : liquidityScore >= 0.5 ? "中" : "低"
+trapType  = upperLiqStrength == "强" and liquidityScore > 0.7 ? " (做空陷阱)" : lowerLiqStrength == "强" and liquidityScore > 0.7 ? " (做多陷阱)" : ""
+
+tradeOpportunity = "观望"
+tradeColor       = neutralColor
+if upperLiqRaid and lowerLiqStrength == "强"
+    tradeOpportunity := "做多机会"
+    tradeColor := bullColor
+else if lowerLiqRaid and upperLiqStrength == "强"
+    tradeOpportunity := "做空机会"
+    tradeColor := bearColor
+else if upperLiqStrength == "强" and lowerLiqStrength != "强"
+    tradeOpportunity := "潜在做空"
+    tradeColor := color.new(bearColor, 40)
+else if lowerLiqStrength == "强" and upperLiqStrength != "强"
+    tradeOpportunity := "潜在做多"
+    tradeColor := color.new(bullColor, 40)
+
+// ========== 可视化 ==========
+// 1. 蜡烛形态标签
+if showCandlePatterns and patternStr != ""
+    label.new(bar_index, high, patternStr,
+              color=color.new(patternColor, 30),
+              textcolor=color.white,
+              style=label.style_label_down,
+              size=size.small)
+
+// 2. 流动性区域圆点线
+upperPlotVal = showLiquidityZones ? upperLiqZone : na
+lowerPlotVal = showLiquidityZones ? lowerLiqZone : na
+plot(upperPlotVal, "上方流动性",
+     color = showLiquidityZones ? color.new(highLiqColor, 100 - heatmapOpacity) : na,
+     linewidth=2, style=plot.style_circles)
+plot(lowerPlotVal, "下方流动性",
+     color = showLiquidityZones ? color.new(lowLiqColor, 100 - heatmapOpacity) : na,
+     linewidth=2, style=plot.style_circles)
+
+// 3. 流动性掠夺标签
+if showLiquidityRaid and liquidityRaid
+    raidLabel = upperLiqRaid ? "上方掠夺" : "下方掠夺"
+    raidColor = upperLiqRaid ? highLiqColor : lowLiqColor
+    label.new(bar_index, upperLiqRaid ? high : low, raidLabel,
+              color=color.new(raidColor, 20),
+              textcolor=color.white,
+              style=upperLiqRaid ? label.style_label_down : label.style_label_up,
+              size=size.small)
+
+// 4. 安全确认信号（用小勾代替🛡️大标签）
+firstProtection  = patternStr != ""
+secondProtection = liquidityScore > 0.5
+thirdProtection  = not liquidityRaid
+protectionSignal = firstProtection and secondProtection and thirdProtection
+
+if showProtection and protectionSignal and (isHammer or isInvertedHammer or isBullishEngulf)
+    label.new(bar_index, low, "✓",
+              color=color.new(bullColor, 60),
+              textcolor=color.white,
+              style=label.style_label_up,
+              size=size.tiny)
+if showProtection and protectionSignal and (isHangingMan or isShootingStar or isBearishEngulf)
+    label.new(bar_index, high, "✓",
+              color=color.new(bearColor, 60),
+              textcolor=color.white,
+              style=label.style_label_down,
+              size=size.tiny)
+
+// ========== 信息面板（极简 5 行） ==========
+if showTable
+    bgColor     = color.new(#1E1E2D, 20)
+    headerColor = color.new(#2B2B43, 30)
+    var table liqTable = table.new(position.bottom_left, 2, 5, bgColor, headerColor, 1, headerColor)
+
+    // 标题
+    dirColor = liquidityDirection == "涨" ? bullColor : bearColor
+    table.cell(liqTable, 0, 0, "流动性分析", bgcolor=headerColor, text_color=color.white, text_size=size.small)
+    table.cell(liqTable, 1, 0, liquidityDirection, bgcolor=headerColor, text_color=dirColor, text_size=size.small)
+
+    // 流动性强度
+    table.cell(liqTable, 0, 1, "强度", bgcolor=bgColor, text_color=color.white, text_size=size.small)
+    table.cell(liqTable, 1, 1, str.tostring(liquidityPercentage) + "%", bgcolor=bgColor, text_color=dirColor, text_size=size.small)
+
+    // 风险等级
+    riskCellColor = riskLevel == "高" ? bearColor : riskLevel == "中" ? warnColor : bullColor
+    table.cell(liqTable, 0, 2, "风险等级", bgcolor=bgColor, text_color=color.white, text_size=size.small)
+    table.cell(liqTable, 1, 2, riskLevel + trapType, bgcolor=bgColor, text_color=riskCellColor, text_size=size.small)
+
+    // 止损建议
+    stopText  = liquidityDirection == "涨" ? str.tostring(math.round(longStopLoss, 4)) : str.tostring(math.round(shortStopLoss, 4))
+    stopColor = liquidityDirection == "涨" ? bullColor : bearColor
+    table.cell(liqTable, 0, 3, "止损建议", bgcolor=bgColor, text_color=color.white, text_size=size.small)
+    table.cell(liqTable, 1, 3, stopText, bgcolor=bgColor, text_color=stopColor, text_size=size.small)
+
+    // 交易信号
+    table.cell(liqTable, 0, 4, "交易信号", bgcolor=bgColor, text_color=color.white, text_size=size.small)
+    table.cell(liqTable, 1, 4, tradeOpportunity, bgcolor=bgColor, text_color=tradeColor, text_size=size.small)
+
+// ========== 警报 ==========
+alertcondition(liquidityRaid, title="流动性掠夺", message="检测到流动性掠夺行为，注意假突破/假跌破。")
+alertcondition(upperLiqRaid,  title="上方流动性掠夺", message="上方假突破后回落，潜在做空机会。")
+alertcondition(lowerLiqRaid,  title="下方流动性掠夺", message="下方假跌破后反弹，潜在做多机会。")
+isHighLiquidityZone = liquidityScore > 0.7
+alertcondition(isHighLiquidityZone, title="高流动性区域", message="当前处于高流动性区域，注意潜在掠夺风险。")

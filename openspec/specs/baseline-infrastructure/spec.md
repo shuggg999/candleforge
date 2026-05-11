@@ -5,17 +5,22 @@ TBD - created by archiving change cleanup-baseline-and-lock. Update Purpose afte
 ## Requirements
 ### Requirement: Service Topology
 
-The project SHALL ship a `docker-compose.yml` at repo root that defines exactly two services for the data-service runtime: `clickhouse` (image `clickhouse/clickhouse-server:latest`) and `data-service` (built from local `Dockerfile`). The compose file MUST NOT depend on any docker network or volume that lives outside this repository or assumes a sibling project is running.
+The project SHALL ship a `docker-compose.yml` at repo root that defines exactly three services for the data-service runtime: `clickhouse` (image `clickhouse/clickhouse-server:latest`), `data-service` (built from local `Dockerfile`), and `nats` (image `nats:2.10-alpine` running with JetStream enabled). The compose file MUST NOT depend on any docker network or volume that lives outside this repository or assumes a sibling project is running.
 
 #### Scenario: Compose starts on a fresh checkout
 
 - **WHEN** a developer clones the repo, sets `CLICKHOUSE_DATA_DIR` to a writable absolute path, and runs `docker compose up -d`
-- **THEN** both `clickhouse` and `data-service` containers reach `Up (healthy)` within 90 seconds without referencing any external network or sibling project
+- **THEN** all three containers — `clickhouse`, `nats`, and `data-service` — reach `Up (healthy)` within 90 seconds without referencing any external network or sibling project
 
 #### Scenario: No phantom external network
 
 - **WHEN** an automated check parses `docker-compose.yml`
 - **THEN** the file MUST NOT declare any `external: true` network and MUST NOT reference `docker-vpn-gateway_vpn_network` or any other network defined outside this repo
+
+#### Scenario: NATS volume persists across container recreation
+
+- **WHEN** `docker compose down nats && docker compose up -d nats` is invoked
+- **THEN** the `nats-data` named volume retains JetStream files so the `OHLCV` stream and any unconsumed messages within `MaxAge` are preserved
 
 ### Requirement: Parameterized ClickHouse Persistence Path
 
@@ -33,12 +38,17 @@ The ClickHouse data volume mount path SHALL be parameterized via the `CLICKHOUSE
 
 ### Requirement: Required Environment Variables
 
-The project SHALL declare a `.env.example` file enumerating every environment variable consumed by the data-service runtime, with safe defaults or clear placeholder values. Required keys include: `CLICKHOUSE_HOST`, `CLICKHOUSE_PORT`, `CLICKHOUSE_DATABASE`, `CLICKHOUSE_USER`, `CLICKHOUSE_PASSWORD`, `ENABLED_EXCHANGES`, `LOG_LEVEL`, `RECOVERY_CHECK_INTERVAL`, `MAX_GAP_MINUTES`, `MAX_SYMBOLS_PER_WS_CONNECTION`. Future capabilities (alerts, detection thresholds, etc.) SHALL extend `.env.example` rather than introducing undocumented runtime knobs.
+The project SHALL declare a `.env.example` file enumerating every environment variable consumed by the data-service runtime, with safe defaults or clear placeholder values. Required keys include: `CLICKHOUSE_HOST`, `CLICKHOUSE_PORT`, `CLICKHOUSE_DATABASE`, `CLICKHOUSE_USER`, `CLICKHOUSE_PASSWORD`, `ENABLED_EXCHANGES`, `LOG_LEVEL`, `RECOVERY_CHECK_INTERVAL`, `MAX_GAP_MINUTES`, `MAX_SYMBOLS_PER_WS_CONNECTION`, `NATS_URL`, `NATS_ENABLE`. Future capabilities (alerts, detection thresholds, etc.) SHALL extend `.env.example` rather than introducing undocumented runtime knobs.
 
 #### Scenario: Operator audits required config
 
 - **WHEN** an operator opens `.env.example`
 - **THEN** every variable referenced by `src/config.py` and any new module under `src/` is listed with either a default value or a `# REQUIRED` placeholder
+
+#### Scenario: NATS keys documented
+
+- **WHEN** an operator searches `.env.example` for `NATS`
+- **THEN** the file shows `NATS_URL` (default `nats://nats:4222` for in-cluster, override for jarvis hostnames) and `NATS_ENABLE` (default `true`, set to `false` to no-op the publisher)
 
 ### Requirement: Health Check Per Service
 
@@ -78,6 +88,8 @@ Modules MUST NOT start background threads or open network sockets at import time
 
 **单一 /health 路由**：所有 `/api/v1/health` 实现 MUST 集中在 `src/main.py` 中的单一 endpoint。`src/api/routes.py` 等 router 文件 MUST NOT 注册同路径的 endpoint —— FastAPI 先注册者优先，重复注册会**静默覆盖** main.py 的实现，使 sub-probe 失效。
 
+**Health sub-probe 完整列表** (本仓 data-service 进程暴露)：`database`, `classification`, `detection`, `alerts`, `ws_collectors`, `recovery`, `nats`。`nats` sub-probe shape 详见 `nats-event-bus` capability spec。
+
 #### Scenario: Adding a new module surfaces in /health
 
 - **WHEN** a developer adds `src/classification/` following this convention
@@ -97,6 +109,11 @@ Modules MUST NOT start background threads or open network sockets at import time
 
 - **WHEN** a sub-probe function (e.g. `classifier.health()`) raises an unexpected exception
 - **THEN** `/api/v1/health` still returns a JSON body with that sub-probe's value set to `{"status": "failed", "reason": <error string>}` and overall HTTP status 503, NOT a 500 internal server error
+
+#### Scenario: NATS sub-probe present from this change onward
+
+- **WHEN** `GET /api/v1/health` is hit after `introduce-nats-event-bus` is archived
+- **THEN** `body.details.nats` exists with the shape defined in `nats-event-bus` capability spec, regardless of whether `NATS_ENABLE` is true or false
 
 ### Requirement: Repository Hygiene — gitignore Coverage
 

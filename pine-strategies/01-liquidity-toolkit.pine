@@ -1,0 +1,124 @@
+//@version=6
+// ============================================================
+// 流动性工具箱 v1
+// 从原"蜡烛流动性掠夺策略"中提取的核心可用零件
+// 核心功能：升级版假突破检测 + 关键位 ATR 止损 + 双向博弈信号
+// 设计目标：独立可用 / 易移植到其他策略
+// ============================================================
+indicator("流动性工具箱 v1", overlay=true, max_labels_count=200)
+
+// ========== 显示开关 ==========
+showZones = input.bool(true, "显示关键位(圆点线)",  group="显示")
+showRaids = input.bool(true, "显示假突破信号",      group="显示")
+showStop  = input.bool(true, "显示止损参考线",      group="显示")
+showTable = input.bool(true, "显示信息面板",        group="显示")
+
+// ========== 假突破检测参数 ==========
+lookback         = input.int(20, "回看窗口(K线数)", minval=5, maxval=200, group="假突破检测", tooltip="确定'关键位'用的历史长度。短线 20，中线 50+。原脚本只用 4 太短。")
+piercingDepthAtr = input.float(0.3, "插针深度(ATR倍数)", minval=0.1, maxval=2.0, step=0.1, group="假突破检测", tooltip="价格必须穿透关键位至少这么深(用 ATR 自适应波动率)才算有效插针。原脚本没有这个判定。")
+volumeMultiplier = input.float(1.5, "成交量放大倍数",   minval=1.0, maxval=5.0, step=0.1, group="假突破检测", tooltip="当前成交量需要大于 20 根均量的这个倍数。原脚本固定 1.2 太宽松。")
+requireRange     = input.bool(true, "要求前置震荡(降低假信号)", group="假突破检测", tooltip="开启后，只有'价格曾在关键位附近震荡过'时才算真掠夺。这是真实流动性堆积的前提。")
+rangeBars        = input.int(10, "震荡确认K线数", minval=3, maxval=50, group="假突破检测")
+
+// ========== 止损参数 ==========
+stopAtrBuffer = input.float(0.5, "止损 ATR 缓冲倍数", minval=0.1, maxval=2.0, step=0.1, group="止损", tooltip="止损 = 对侧关键位 ± ATR × 该倍数。常用 0.5-1.0。")
+
+// ========== 颜色（柔和主题） ==========
+bullColor    = #4CAF50  // 多头
+bearColor    = #FF5252  // 空头
+highLiqColor = #FF7043  // 上方关键位
+lowLiqColor  = #42A5F5  // 下方关键位
+neutralColor = #9E9E9E  // 中性
+
+// ========== 基础数据 ==========
+atrVal = ta.atr(14)
+volAvg = ta.sma(volume, 20)
+
+// 关键位 = 排除当前 K 线后，回看窗口内的最高/最低（用 high[1] 而非 high 避免当前K线污染）
+upperZone = ta.highest(high[1], lookback)
+lowerZone = ta.lowest(low[1], lookback)
+
+// ========== 前置震荡确认 ==========
+// 检查近 rangeBars 内，是否有 K 线接近过关键位（±0.5 ATR 内算"接近"）
+// 至少有 2 次"接近" 才算真正的"流动性堆积区"
+nearUpperCount = 0
+nearLowerCount = 0
+for i = 1 to rangeBars
+    if math.abs(high[i] - upperZone) < atrVal * 0.5
+        nearUpperCount += 1
+    if math.abs(low[i] - lowerZone) < atrVal * 0.5
+        nearLowerCount += 1
+hasUpperRange = nearUpperCount >= 2
+hasLowerRange = nearLowerCount >= 2
+
+// ========== 假突破检测（核心逻辑） ==========
+piercingDepth    = atrVal * piercingDepthAtr
+upperPiercedDeep = high > upperZone + piercingDepth   // 上方足够深的插针
+lowerPiercedDeep = low  < lowerZone - piercingDepth   // 下方足够深的插针
+upperClosedBack  = close < upperZone                  // 收盘回到关键位下方
+lowerClosedBack  = close > lowerZone                  // 收盘回到关键位上方
+volSpike         = volume > volAvg * volumeMultiplier // 成交量放大
+
+upperRaid = upperPiercedDeep and upperClosedBack and volSpike and (not requireRange or hasUpperRange)
+lowerRaid = lowerPiercedDeep and lowerClosedBack and volSpike and (not requireRange or hasLowerRange)
+anyRaid   = upperRaid or lowerRaid
+
+// ========== 止损建议 ==========
+// 多单：止损放在下方关键位之外 + ATR 缓冲（避免被随机插针扫掉）
+// 空单：止损放在上方关键位之外 + ATR 缓冲
+longStopPrice  = lowerZone - atrVal * stopAtrBuffer
+shortStopPrice = upperZone + atrVal * stopAtrBuffer
+
+// ========== 双向博弈信号 ==========
+// 上方被掠夺 → 多头止损被扫 → 接下来通常下行 → 做空机会
+// 下方被掠夺 → 空头止损被扫 → 接下来通常上行 → 做多机会
+signalType  = "观望"
+signalColor = neutralColor
+if upperRaid
+    signalType := "做空机会"
+    signalColor := bearColor
+else if lowerRaid
+    signalType := "做多机会"
+    signalColor := bullColor
+
+// ========== 可视化 ==========
+// 关键位圆点线
+plot(showZones ? upperZone : na, "上方关键位", color = showZones ? color.new(highLiqColor, 30) : na, linewidth=2, style=plot.style_circles)
+plot(showZones ? lowerZone : na, "下方关键位", color = showZones ? color.new(lowLiqColor,  30) : na, linewidth=2, style=plot.style_circles)
+
+// 假突破事件标签
+if showRaids and upperRaid
+    label.new(bar_index, high, "上方掠夺", color=color.new(highLiqColor, 20), textcolor=color.white, style=label.style_label_down, size=size.small)
+if showRaids and lowerRaid
+    label.new(bar_index, low, "下方掠夺", color=color.new(lowLiqColor, 20), textcolor=color.white, style=label.style_label_up, size=size.small)
+
+// 止损参考线
+plot(showStop ? longStopPrice  : na, "多单止损参考", color = showStop ? color.new(bullColor, 60) : na, linewidth=1, style=plot.style_linebr)
+plot(showStop ? shortStopPrice : na, "空单止损参考", color = showStop ? color.new(bearColor, 60) : na, linewidth=1, style=plot.style_linebr)
+
+// ========== 信息面板（极简 5 行） ==========
+if showTable
+    bgColor     = color.new(#1E1E2D, 20)
+    headerColor = color.new(#2B2B43, 30)
+    var table panel = table.new(position.bottom_left, 2, 5, bgColor, headerColor, 1, headerColor)
+
+    table.cell(panel, 0, 0, "流动性工具箱", bgcolor=headerColor, text_color=color.white, text_size=size.small)
+    table.cell(panel, 1, 0, "v1", bgcolor=headerColor, text_color=color.silver, text_size=size.small)
+
+    table.cell(panel, 0, 1, "上方关键位", bgcolor=bgColor, text_color=color.white, text_size=size.small)
+    table.cell(panel, 1, 1, str.tostring(math.round(upperZone, 4)), bgcolor=bgColor, text_color=highLiqColor, text_size=size.small)
+
+    table.cell(panel, 0, 2, "下方关键位", bgcolor=bgColor, text_color=color.white, text_size=size.small)
+    table.cell(panel, 1, 2, str.tostring(math.round(lowerZone, 4)), bgcolor=bgColor, text_color=lowLiqColor, text_size=size.small)
+
+    stopRef = signalType == "做多机会" ? str.tostring(math.round(longStopPrice, 4)) : signalType == "做空机会" ? str.tostring(math.round(shortStopPrice, 4)) : "—"
+    table.cell(panel, 0, 3, "止损参考", bgcolor=bgColor, text_color=color.white, text_size=size.small)
+    table.cell(panel, 1, 3, stopRef, bgcolor=bgColor, text_color=signalColor, text_size=size.small)
+
+    table.cell(panel, 0, 4, "当前信号", bgcolor=bgColor, text_color=color.white, text_size=size.small)
+    table.cell(panel, 1, 4, signalType, bgcolor=bgColor, text_color=signalColor, text_size=size.small)
+
+// ========== 警报 ==========
+alertcondition(upperRaid, title="上方假突破(做空)", message="检测到上方关键位被插针并回落，潜在做空机会。")
+alertcondition(lowerRaid, title="下方假突破(做多)", message="检测到下方关键位被插针并反弹，潜在做多机会。")
+alertcondition(anyRaid,   title="任意方向假突破",   message="检测到流动性掠夺事件。")

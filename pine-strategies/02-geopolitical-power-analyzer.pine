@@ -1,0 +1,1037 @@
+//@version=6
+indicator("全球加密地缘力量分析器 Pro", overlay=true, max_labels_count=500)
+
+// ===== 核心配置参数 =====
+// 显示设置
+var displayGroup = "显示设置"
+compactMode = input.bool(true, "紧凑模式显示", tooltip="使用更紧凑的视觉布局", group=displayGroup)
+showMainInfo = input.bool(true, "显示主导信息", tooltip="在左上角显示主导阵营信息", group=displayGroup)
+showPowerGraph = input.bool(false, "显示力量曲线", tooltip="在主图上显示力量曲线", group=displayGroup)
+showHeatmap = input.bool(true, "显示热力图", tooltip="显示地区力量热力图", group=displayGroup)
+topMargin = input.int(25, "顶部边距", minval=0, maxval=100, tooltip="左上角信息面板的顶部边距", group=displayGroup)
+showTrapInfo = input.bool(true, "显示诱惑分析", tooltip="在左上角显示市场诱惑力分析", group=displayGroup)
+showWhaleInfo = input.bool(true, "显示主力分析", tooltip="在左上角显示主力庄家行为分析", group=displayGroup)
+
+// 周期设置
+var timeframeGroup = "周期设置"
+timeframeOption = input.string("自动", "分析周期", options=["自动", "5分钟", "15分钟", "30分钟", "1小时", "4小时", "日线"], group=timeframeGroup)
+lookbackPeriod = input.int(14, "数据分析周期", minval=1, maxval=120, group=timeframeGroup)
+multiTimeframe = input.bool(true, "多时间框架分析", tooltip="同时分析多个时间框架", group=timeframeGroup)
+
+// 计算设置
+var calcGroup = "计算设置"
+volumeSensitivity = input.float(1.2, "成交量敏感度", minval=0.1, maxval=3.0, step=0.1, group=calcGroup)
+momentumWeight = input.float(0.4, "动量权重", minval=0.0, maxval=1.0, step=0.1, tooltip="价格动量在力量计算中的权重", group=calcGroup)
+volatilityWeight = input.float(0.3, "波动率权重", minval=0.0, maxval=1.0, step=0.1, tooltip="波动率在力量计算中的权重", group=calcGroup)
+alertThreshold = input.float(2.0, "异常事件阈值", minval=1.0, maxval=5.0, step=0.1, group=calcGroup)
+
+// 地区权重设置
+var regionGroup = "地区权重设置"
+usaWeight = input.float(1.0, "美国主导阵营权重", minval=0.1, maxval=2.0, step=0.1, group=regionGroup)
+euWeight = input.float(1.0, "欧盟/北欧权重", minval=0.1, maxval=2.0, step=0.1, group=regionGroup)
+asiaWeight = input.float(1.0, "东亚资本圈权重", minval=0.1, maxval=2.0, step=0.1, group=regionGroup)
+russiaWeight = input.float(1.0, "俄罗斯-独联体权重", minval=0.1, maxval=2.0, step=0.1, group=regionGroup)
+meWeight = input.float(1.0, "中东新兴力量权重", minval=0.1, maxval=2.0, step=0.1, group=regionGroup)
+offshoreWeight = input.float(1.0, "离岸金融枢纽权重", minval=0.1, maxval=2.0, step=0.1, group=regionGroup)
+
+// 标签显示设置
+var labelGroup = "标签显示设置"
+showEventLabels = input.bool(true, "显示地缘事件标签", tooltip="在图表上显示地缘政治事件标签", group=labelGroup)
+showSessionLabels = input.bool(true, "显示时段切换标签", tooltip="在图表上显示交易时段切换标签", group=labelGroup)
+maxLabels = input.int(10, "最大标签数量", minval=1, maxval=50, tooltip="图表上显示的最大标签数量", group=labelGroup)
+eventSensitivity = input.float(0.7, "事件检测敏感度", minval=0.1, maxval=1.0, step=0.1, tooltip="地缘事件检测的敏感度，越高越容易触发", group=labelGroup)
+
+// ==== 市场诱惑分析参数 ====
+var trapGroup = "市场诱惑分析设置"
+trapThreshold = input.float(70, "诱惑阈值", minval=50, maxval=95, step=5, tooltip="识别市场诱惑的阈值百分比", group=trapGroup)
+shortTrapPeriod = input.int(5, "短期诱惑周期", minval=1, maxval=50, tooltip="短期市场诱惑分析周期", group=trapGroup)
+mediumTrapPeriod = input.int(14, "中期诱惑周期", minval=5, maxval=100, tooltip="中期市场诱惑分析周期", group=trapGroup)
+buyTrapColor = input.color(#FF5252, "买入诱惑颜色", group=trapGroup)
+sellTrapColor = input.color(#4CAF50, "卖出诱惑颜色", group=trapGroup)
+neutralTrapColor = input.color(#9E9E9E, "中性诱惑颜色", group=trapGroup)
+
+// ===== 主力庄家分析参数 =====
+var whaleGroup = "主力庄家分析设置"
+enableWhaleDetection = input.bool(true, "启用主力检测", tooltip="识别主力庄家行为", group=whaleGroup)
+whaleSensitivity = input.float(1.0, "主力检测敏感度", minval=0.5, maxval=2.0, step=0.1, tooltip="值越高越容易检测到主力行为", group=whaleGroup)
+volumeThreshold = input.float(1.5, "成交量异常阈值", minval=1.1, maxval=3.0, step=0.1, tooltip="识别大额交易的成交量阈值", group=whaleGroup)
+whaleLookback = input.int(20, "主力行为检测周期", minval=5, maxval=50, tooltip="用于检测主力行为的历史数据周期", group=whaleGroup)
+intrabarSensitivity = input.float(0.8, "K线内结构敏感度", minval=0.3, maxval=1.0, step=0.1, tooltip="K线影线与实体比例分析的敏感度", group=whaleGroup)
+
+// ===== 主力类型定义 =====
+var trendWhaleColor = input.color(#9C27B0, "趋势型主力颜色", group=whaleGroup)
+var accumWhaleColor = input.color(#FFC107, "蓄势型主力颜色", group=whaleGroup)
+var distWhaleColor = input.color(#2196F3, "分散型主力颜色", group=whaleGroup)
+var instWhaleColor = input.color(#4CAF50, "机构型主力颜色", group=whaleGroup)
+var manipWhaleColor = input.color(#F44336, "操控型主力颜色", group=whaleGroup)
+
+// 根据选择的周期设置实际使用的周期
+getTimeframe() =>
+    if timeframeOption == "自动"
+        timeframe.period
+    else if timeframeOption == "5分钟"
+        "5"
+    else if timeframeOption == "15分钟"
+        "15"
+    else if timeframeOption == "30分钟"
+        "30"
+    else if timeframeOption == "1小时"
+        "60"
+    else if timeframeOption == "4小时"
+        "240"
+    else
+        "D"
+
+selectedTimeframe = getTimeframe()
+
+// 获取次级时间框架（用于多时间框架分析）
+getSecondaryTimeframe() =>
+    if timeframe.in_seconds(selectedTimeframe) <= 300  // 5分钟
+        "15"
+    else if timeframe.in_seconds(selectedTimeframe) <= 900  // 15分钟
+        "60"
+    else if timeframe.in_seconds(selectedTimeframe) <= 1800  // 30分钟
+        "240"
+    else if timeframe.in_seconds(selectedTimeframe) <= 3600  // 1小时
+        "D"
+    else if timeframe.in_seconds(selectedTimeframe) <= 14400  // 4小时
+        "W"
+    else
+        "M"
+
+secondaryTimeframe = getSecondaryTimeframe()
+
+// 根据周期调整参数
+adjustedLookback = timeframe.in_seconds(selectedTimeframe) <= 900 ? lookbackPeriod * 2 :
+                   timeframe.in_seconds(selectedTimeframe) <= 3600 ? lookbackPeriod :
+                   timeframe.in_seconds(selectedTimeframe) <= 14400 ? math.max(lookbackPeriod / 2, 5) :
+                   math.max(lookbackPeriod / 4, 3)
+
+// ===== 地缘政治阵营和Web3支持度定义 =====
+// 使用变量定义时间范围和Web3支持度
+usaStart = 13
+usaEnd = 22
+usaWeb3 = 0.7
+
+euStart = 7
+euEnd = 16
+euWeb3 = 0.8
+
+asiaStart = 0
+asiaEnd = 8
+asiaWeb3 = 0.5
+
+russiaStart = 6
+russiaEnd = 14
+russiaWeb3 = 0.6
+
+meStart = 5
+meEnd = 13
+meWeb3 = 0.9
+
+offshoreStart = 1
+offshoreEnd = 16
+offshoreWeb3 = 0.95
+
+// ===== 地缘政治对立轴影响系数 =====
+usVsChinaInfluence = 1.0
+russiaVsWestInfluence = 0.8
+web3VsWeb2Influence = 0.9
+
+// ===== 辅助函数 =====
+inSession(start, end) =>
+    h = hour(time)
+    (h >= start and h < end) or (start > end and (h >= start or h < end))
+
+// 格式化UTC时间为可读字符串
+formatUTCTime(hour) =>
+    hour < 10 ? "0" + str.tostring(hour) + ":00" : str.tostring(hour) + ":00"
+
+// 计算价格动量
+getMomentum() =>
+    // 结合RSI和MACD计算动量
+    rsiValue = ta.rsi(close, 14)
+    [macdLine, signalLine, _] = ta.macd(close, 12, 26, 9)
+    macdValue = macdLine - signalLine
+
+    // 归一化动量值
+    rsiComponent = (rsiValue - 50) / 50  // 范围: -1 到 1
+    macdComponent = macdValue / ta.stdev(macdValue, 20)  // 标准化MACD
+
+    // 组合动量指标
+    momentum = rsiComponent * 0.6 + macdComponent * 0.4
+    momentum
+
+// 计算波动率因子
+getVolatilityFactor() =>
+    // 使用ATR计算波动率
+    atrValue = ta.atr(14)
+    atrRatio = atrValue / ta.sma(atrValue, 20)
+
+    // 波动率因子
+    volFactor = math.log(atrRatio + 0.5) * 2  // 对数变换使分布更均匀
+    volFactor
+
+// 改进的会话力量计算 - 整合动量和波动率
+sessionPower(sessionStart, sessionEnd, web3Support, regionWeight) =>
+    isActive = inSession(sessionStart, sessionEnd)
+    bull = 0.0
+    bear = 0.0
+
+    if isActive
+        // 获取价格变动百分比
+        priceChange = (close - open) / open * 100
+
+        // 计算相对成交量
+        avgVol = ta.sma(volume, math.round(adjustedLookback))
+        relativeVol = volume / math.max(avgVol, 0.001)
+        volFactor = math.pow(relativeVol, volumeSensitivity)
+
+        // 获取动量和波动率因子
+        momentum = getMomentum()
+        volatility = getVolatilityFactor()
+
+        // 计算综合力量因子
+        powerFactor = (1 - momentumWeight - volatilityWeight) * volFactor +
+                      momentumWeight * momentum +
+                      volatilityWeight * volatility
+
+        // 应用Web3支持度和地区权重
+        adjustedFactor = powerFactor * (0.5 + web3Support/2) * regionWeight
+
+        // 计算多空力量
+        if priceChange > 0 or (priceChange == 0 and momentum > 0)
+            bull := math.abs(priceChange + momentum) * adjustedFactor
+        else
+            bear := math.abs(priceChange + momentum) * adjustedFactor
+
+    // 返回平滑后的力量
+    smoothPeriod = math.max(math.round(adjustedLookback / 3), 2)
+    [ta.ema(bull, smoothPeriod), ta.ema(bear, smoothPeriod)]
+
+// 多时间框架分析 - 获取次级时间框架的力量
+getSecondaryPower(ticker, tf, start, end, web3Support, weight) =>
+    [bull, bear] = request.security(ticker, tf, sessionPower(start, end, web3Support, weight), barmerge.gaps_off, barmerge.lookahead_off)
+    [bull, bear]
+
+// ===== 市场诱惑力分析函数 =====
+// 虚假突破检测
+detectFalseBreakout() =>
+    atr = ta.atr(14)
+    recentHigh = ta.highest(high, shortTrapPeriod)
+    recentLow = ta.lowest(low, shortTrapPeriod)
+    upperBand = ta.sma(high, mediumTrapPeriod) + atr * 2
+    lowerBand = ta.sma(low, mediumTrapPeriod) - atr * 2
+    relativeVolume = volume / ta.sma(volume, mediumTrapPeriod)
+
+    falseBreakoutUp = high > recentHigh and close < recentHigh and volume < ta.sma(volume, shortTrapPeriod) * 1.5
+    falseBreakoutDown = low < recentLow and close > recentLow and volume < ta.sma(volume, shortTrapPeriod) * 1.5
+
+    [falseBreakoutUp, falseBreakoutDown, upperBand, lowerBand, recentHigh, recentLow, relativeVolume, atr]
+
+// 计算诱惑得分
+calculateTrapScores() =>
+    rsi = ta.rsi(close, 14)
+    [falseBreakoutUp, falseBreakoutDown, upperBand, lowerBand, recentHigh, recentLow, relativeVolume, atr] = detectFalseBreakout()
+
+    // 波动率和市场情绪分析
+    volatility = ta.stdev(close, shortTrapPeriod) / ta.sma(close, shortTrapPeriod) * 100
+    normVol = volatility / ta.sma(volatility, mediumTrapPeriod)
+    fearIndex = math.max(0, math.min(1, (normVol - 0.5) * 2))
+    greedIndex = close > ta.sma(close, mediumTrapPeriod) ? (close - ta.sma(close, mediumTrapPeriod)) / ta.sma(close, mediumTrapPeriod) * 10 : 0
+    normalizedGreed = math.min(1, greedIndex)
+
+    // 计算买入诱惑得分
+    buyTrapScore = 0.0
+    if close < lowerBand * 1.05 or low < recentLow * 1.02
+        buyTrapScore := 0.4
+        if falseBreakoutDown
+            buyTrapScore := buyTrapScore + 0.3
+        if relativeVolume < 0.7
+            buyTrapScore := buyTrapScore + 0.2
+        if fearIndex > 0.7 and rsi > 40
+            buyTrapScore := buyTrapScore + 0.3
+    buyTrapScore := math.min(1.0, buyTrapScore) * 100
+
+    // 计算卖出诱惑得分
+    sellTrapScore = 0.0
+    if close > upperBand * 0.95 or high > recentHigh * 0.98
+        sellTrapScore := 0.4
+        if falseBreakoutUp
+            sellTrapScore := sellTrapScore + 0.3
+        if relativeVolume < 0.7
+            sellTrapScore := sellTrapScore + 0.2
+        if normalizedGreed > 0.7 and rsi < 60
+            sellTrapScore := sellTrapScore + 0.3
+    sellTrapScore := math.min(1.0, sellTrapScore) * 100
+
+    // 确定当前诱惑类型和强度
+    trapType = buyTrapScore > sellTrapScore ? "买入诱惑" : sellTrapScore > buyTrapScore ? "卖出诱惑" : "无明显诱惑"
+    trapScore = math.max(buyTrapScore, sellTrapScore)
+    trapActive = trapScore >= trapThreshold
+
+    [trapType, trapScore, trapActive, buyTrapScore, sellTrapScore, falseBreakoutUp, falseBreakoutDown, atr]
+
+// ===== 主力庄家行为识别函数 =====
+// 分析成交量特征
+analyzeVolumePattern() =>
+    // 计算相对成交量指标
+    avgVol = ta.sma(volume, whaleLookback)
+    relVol = volume / avgVol
+
+    // 检测成交量异常
+    highVol = relVol > volumeThreshold
+
+    // 检测成交量趋势
+    volSlope = ta.linreg(volume, whaleLookback, 0) - ta.linreg(volume, whaleLookback, 1)
+    volTrendUp = volSlope > 0
+
+    // 成交量稳定性 - 低标准差表示更可能是散户，高标准差更可能是主力干预
+    volStdDev = ta.stdev(relVol, whaleLookback) / ta.sma(relVol, whaleLookback)
+    volStability = volStdDev > 0.4 * whaleSensitivity
+
+    // 结果
+    [relVol, highVol, volTrendUp, volStability]
+
+// 分析价格控制
+analyzePriceControl() =>
+    // 计算价格波动受控程度
+    atr = ta.atr(14)
+    trueRange = ta.tr
+
+    // K线结构分析 - 影线与实体比例
+    bodySize = math.abs(close - open)
+    upperWick = high - math.max(close, open)
+    lowerWick = math.min(close, open) - low
+
+    // 影线比例
+    wickRatio = (upperWick + lowerWick) / math.max(bodySize, atr * 0.05)
+
+    // 计算价格控制指数 (CCI)
+    controlIndex = ta.cci(close, 20)
+    highControl = math.abs(controlIndex) > 100 * intrabarSensitivity
+
+    // 价格运行的流畅度 - 更流畅通常表示主力干预
+    smoothness = 1 - (ta.stdev(close, 10) / (ta.highest(close, 10) - ta.lowest(close, 10) + 0.001))
+    highSmoothness = smoothness > 0.7 * intrabarSensitivity
+
+    // 价格通道受控检测
+    upperChannel = ta.highest(close, whaleLookback) + atr
+    lowerChannel = ta.lowest(close, whaleLookback) - atr
+    inControlledChannel = close > lowerChannel and close < upperChannel
+
+    [wickRatio, highControl, highSmoothness, inControlledChannel]
+
+// 检测资金流向
+detectMoneyFlow() =>
+    // 估计资金流向
+    typicalPrice = (high + low + close) / 3
+    moneyFlow = typicalPrice * volume
+
+    // 计算正/负资金流
+    posFlow = close > open ? moneyFlow : 0
+    negFlow = close <= open ? moneyFlow : 0
+
+    // 资金流比率
+    posMF = math.sum(posFlow, whaleLookback)
+    negMF = math.sum(negFlow, whaleLookback)
+    mfRatio = posMF / math.max(negMF, 1)
+
+    // 资金流指标
+    mfi = ta.mfi(hlc3, whaleLookback)
+
+    // 资金力量指标
+    obv = ta.obv
+    obvSlope = obv - obv[5]
+
+    [mfRatio > 1.2 * whaleSensitivity, mfi > 50, obvSlope > 0]
+
+// 智能价格行为分析
+analyzePriceAction() =>
+    // 价格多空判断
+    bullish = close > open
+
+    // 趋势分析
+    ema20 = ta.ema(close, 20)
+    ema50 = ta.ema(close, 50)
+    trendUp = ema20 > ema50
+
+    // 价格动量
+    rsi = ta.rsi(close, 14)
+    highMomentum = rsi > 70 or rsi < 30
+
+    // K线形态
+    doji = math.abs(close - open) < ta.atr(14) * 0.1
+    marubozu = math.abs(close - open) > ta.atr(14) * 0.8
+
+    // 价格突破检测
+    recent_high = ta.highest(high[1], whaleLookback - 1)
+    recent_low = ta.lowest(low[1], whaleLookback - 1)
+    breakoutUp = high > recent_high
+    breakoutDown = low < recent_low
+
+    [bullish, trendUp, highMomentum, doji, marubozu, breakoutUp, breakoutDown]
+
+// 主力类型分类函数
+classifyWhaleType() =>
+    // 获取各项分析结果
+    [relVol, highVol, volTrendUp, volStability] = analyzeVolumePattern()
+    [wickRatio, highControl, highSmoothness, inControlledChannel] = analyzePriceControl()
+    [strongBuyFlow, mfiUp, obvUp] = detectMoneyFlow()
+    [bullish, trendUp, highMomentum, doji, marubozu, breakoutUp, breakoutDown] = analyzePriceAction()
+
+    // 主力行为得分计算
+    whaleActivityScore = 0.0
+
+    // 成交量因素
+    if highVol
+        whaleActivityScore := whaleActivityScore + 20 * whaleSensitivity
+    if volStability
+        whaleActivityScore := whaleActivityScore + 15 * whaleSensitivity
+
+    // 价格控制因素
+    if highControl
+        whaleActivityScore := whaleActivityScore + 20 * whaleSensitivity
+    if highSmoothness
+        whaleActivityScore := whaleActivityScore + 10 * whaleSensitivity
+    if wickRatio > 2.0 * intrabarSensitivity
+        whaleActivityScore := whaleActivityScore + 15 * whaleSensitivity
+
+    // 资金流向因素
+    if strongBuyFlow and bullish or not strongBuyFlow and not bullish
+        whaleActivityScore := whaleActivityScore + 20 * whaleSensitivity
+
+    // K线形态因素
+    if marubozu
+        whaleActivityScore := whaleActivityScore + 10 * whaleSensitivity
+    if breakoutUp or breakoutDown
+        whaleActivityScore := whaleActivityScore + 15 * whaleSensitivity
+
+    // 主力方向判断
+    whaleBullish = (strongBuyFlow or (volTrendUp and bullish) or (breakoutUp and highVol))
+
+    // 主力类型判断
+    whaleType = "无主力活动"
+    whaleColor = color.gray
+
+    if whaleActivityScore >= 60
+        // 趋势型主力：价格走势明确，成交量配合
+        if (breakoutUp or breakoutDown) and highVol and highMomentum
+            whaleType := "趋势型主力"
+            whaleColor := trendWhaleColor
+        // 蓄势型主力：区间震荡，成交量有规律波动
+        else if inControlledChannel and volStability and not highMomentum
+            whaleType := "蓄势型主力"
+            whaleColor := accumWhaleColor
+        // 分散型主力：价格温和波动，成交量分散
+        else if highSmoothness and not highVol and wickRatio < 1.5
+            whaleType := "分散型主力"
+            whaleColor := distWhaleColor
+        // 机构型主力：大额交易，但价格波动受控
+        else if highVol and not highMomentum and highControl
+            whaleType := "机构型主力"
+            whaleColor := instWhaleColor
+        // 操控型主力：异常价格行为，伴随异常成交量
+        else if highVol and wickRatio > 2.5 * intrabarSensitivity
+            whaleType := "操控型主力"
+            whaleColor := manipWhaleColor
+        // 默认为混合型
+        else
+            whaleType := "混合型主力"
+            whaleColor := color.rgb(200, 200, 0)
+
+    // 如果有主力活动，添加方向
+    if whaleType != "无主力活动"
+        whaleType := whaleType + (whaleBullish ? "(做多)" : "(做空)")
+
+    [whaleType, whaleColor, whaleActivityScore, whaleBullish]
+
+// 计算主力活跃度变化
+calculateWhaleMomentum() =>
+    var float prevScore = 0.0
+    [_, _, currentScore, _] = classifyWhaleType()
+    scoreDelta = currentScore - prevScore
+    prevScore := currentScore
+
+    momentumState = scoreDelta > 5 ? "增强" :
+                  scoreDelta < -5 ? "减弱" : "稳定"
+
+    momentumEmoji = scoreDelta > 5 ? "↗" :
+                   scoreDelta < -5 ? "↘" : "→"
+
+    [momentumState, momentumEmoji, scoreDelta]
+
+// ===== 各区域力量计算 =====
+// 使用request.security获取选定周期的数据
+[usa_bull, usa_bear] = request.security(syminfo.tickerid, selectedTimeframe, sessionPower(usaStart, usaEnd, usaWeb3, usaWeight), barmerge.gaps_off, barmerge.lookahead_off)
+[eu_bull, eu_bear] = request.security(syminfo.tickerid, selectedTimeframe, sessionPower(euStart, euEnd, euWeb3, euWeight), barmerge.gaps_off, barmerge.lookahead_off)
+[asia_bull, asia_bear] = request.security(syminfo.tickerid, selectedTimeframe, sessionPower(asiaStart, asiaEnd, asiaWeb3, asiaWeight), barmerge.gaps_off, barmerge.lookahead_off)
+[russia_bull, russia_bear] = request.security(syminfo.tickerid, selectedTimeframe, sessionPower(russiaStart, russiaEnd, russiaWeb3, russiaWeight), barmerge.gaps_off, barmerge.lookahead_off)
+[me_bull, me_bear] = request.security(syminfo.tickerid, selectedTimeframe, sessionPower(meStart, meEnd, meWeb3, meWeight), barmerge.gaps_off, barmerge.lookahead_off)
+[offshore_bull, offshore_bear] = request.security(syminfo.tickerid, selectedTimeframe, sessionPower(offshoreStart, offshoreEnd, offshoreWeb3, offshoreWeight), barmerge.gaps_off, barmerge.lookahead_off)
+
+// 计算市场诱惑分析
+[trapType, trapScore, trapActive, buyTrapScore, sellTrapScore, falseBreakoutUp, falseBreakoutDown, trap_atr] = calculateTrapScores()
+
+// 多时间框架分析 - 获取次级时间框架的力量
+var float usa_bull_sec = 0.0
+var float usa_bear_sec = 0.0
+var float eu_bull_sec = 0.0
+var float eu_bear_sec = 0.0
+var float asia_bull_sec = 0.0
+var float asia_bear_sec = 0.0
+
+if multiTimeframe
+    // 美国主导阵营
+    [bull_usa, bear_usa] = getSecondaryPower(syminfo.tickerid, secondaryTimeframe, usaStart, usaEnd, usaWeb3, usaWeight)
+    usa_bull_sec := bull_usa
+    usa_bear_sec := bear_usa
+
+    // 欧盟/北欧
+    [bull_eu, bear_eu] = getSecondaryPower(syminfo.tickerid, secondaryTimeframe, euStart, euEnd, euWeb3, euWeight)
+    eu_bull_sec := bull_eu
+    eu_bear_sec := bear_eu
+
+    // 东亚资本圈
+    [bull_asia, bear_asia] = getSecondaryPower(syminfo.tickerid, secondaryTimeframe, asiaStart, asiaEnd, asiaWeb3, asiaWeight)
+    asia_bull_sec := bull_asia
+    asia_bear_sec := bear_asia
+
+// 净力量计算
+usa_net = usa_bull - usa_bear
+eu_net = eu_bull - eu_bear
+asia_net = asia_bull - asia_bear
+russia_net = russia_bull - russia_bear
+me_net = me_bull - me_bear
+offshore_net = offshore_bull - offshore_bear
+
+// 次级时间框架净力量
+usa_net_secondary = usa_bull_sec - usa_bear_sec
+eu_net_secondary = eu_bull_sec - eu_bear_sec
+asia_net_secondary = asia_bull_sec - asia_bear_sec
+
+// 计算时间框架一致性
+tfConsistencyUSA = usa_net * usa_net_secondary > 0 ? math.min(math.abs(usa_net), math.abs(usa_net_secondary)) / math.max(math.abs(usa_net), math.abs(usa_net_secondary)) : -0.5
+tfConsistencyEU = eu_net * eu_net_secondary > 0 ? math.min(math.abs(eu_net), math.abs(eu_net_secondary)) / math.max(math.abs(eu_net), math.abs(eu_net_secondary)) : -0.5
+tfConsistencyAsia = asia_net * asia_net_secondary > 0 ? math.min(math.abs(asia_net), math.abs(asia_net_secondary)) / math.max(math.abs(asia_net), math.abs(asia_net_secondary)) : -0.5
+
+// ===== 地缘政治对立轴力量计算 =====
+// 美国vs中国竞争轴
+usaVsChinaAxis = usa_net - asia_net
+usaVsChinaPower = math.abs(usaVsChinaAxis) * usVsChinaInfluence
+usaVsChinaDirection = usaVsChinaAxis > 0 ? "美国占优" : "中国占优"
+
+// 俄罗斯vs西方制裁轴
+russiaVsWestAxis = russia_net - (usa_net + eu_net)/2
+russiaVsWestPower = math.abs(russiaVsWestAxis) * russiaVsWestInfluence
+russiaVsWestDirection = russiaVsWestAxis > 0 ? "俄罗斯占优" : "西方占优"
+
+// Web3原生vs Web2巨头转型轴
+web3VsWeb2Axis = (offshore_net + me_net) - (usa_net + asia_net)
+web3VsWeb2Power = math.abs(web3VsWeb2Axis) * web3VsWeb2Influence
+web3VsWeb2Direction = web3VsWeb2Axis > 0 ? "Web3生态占优" : "Web2巨头占优"
+
+// ===== 总体市场力量与主导阵营计算 =====
+// 所有阵营的力量数组
+campPowers = array.new_float(6)
+array.set(campPowers, 0, usa_net)
+array.set(campPowers, 1, eu_net)
+array.set(campPowers, 2, asia_net)
+array.set(campPowers, 3, russia_net)
+array.set(campPowers, 4, me_net)
+array.set(campPowers, 5, offshore_net)
+
+campAbsPowers = array.new_float(6)
+for i = 0 to 5
+    array.set(campAbsPowers, i, math.abs(array.get(campPowers, i)))
+
+// 找出最大力量及索引
+maxPowerVal = 0.0
+maxPowerIdx = -1
+for i = 0 to 5
+    if array.get(campAbsPowers, i) > maxPowerVal
+        maxPowerVal := array.get(campAbsPowers, i)
+        maxPowerIdx := i
+
+// 确定主导阵营
+campNames = array.new_string(6)
+array.set(campNames, 0, "美国主导阵营")
+array.set(campNames, 1, "欧盟/北欧")
+array.set(campNames, 2, "东亚资本圈")
+array.set(campNames, 3, "俄罗斯-独联体")
+array.set(campNames, 4, "中东新兴力量")
+array.set(campNames, 5, "离岸金融枢纽")
+
+dominantCamp = "观察中"
+if maxPowerVal > 0.5 and maxPowerIdx >= 0
+    dominantDir = array.get(campPowers, maxPowerIdx) > 0 ? "(多)" : "(空)"
+    dominantCamp := array.get(campNames, maxPowerIdx) + dominantDir
+
+// 确定最具影响力的地缘政治对立轴
+axisPowers = array.new_float(3)
+array.set(axisPowers, 0, usaVsChinaPower)
+array.set(axisPowers, 1, russiaVsWestPower)
+array.set(axisPowers, 2, web3VsWeb2Power)
+
+axisDirections = array.new_string(3)
+array.set(axisDirections, 0, usaVsChinaDirection)
+array.set(axisDirections, 1, russiaVsWestDirection)
+array.set(axisDirections, 2, web3VsWeb2Direction)
+
+maxAxisPower = 0.0
+maxAxisIdx = -1
+for i = 0 to 2
+    if array.get(axisPowers, i) > maxAxisPower
+        maxAxisPower := array.get(axisPowers, i)
+        maxAxisIdx := i
+
+axisNames = array.new_string(3)
+array.set(axisNames, 0, "美国vs中国")
+array.set(axisNames, 1, "俄罗斯vs西方")
+array.set(axisNames, 2, "Web3vsWeb2")
+
+dominantAxis = "无显著对立轴"
+dominantDirection = ""
+
+if maxAxisPower > 0.7 and maxAxisIdx >= 0
+    dominantAxis := array.get(axisNames, maxAxisIdx)
+    dominantDirection := array.get(axisDirections, maxAxisIdx)
+
+// ===== 地缘事件检测 - 优化版 =====
+// 计算所有对立轴力量总和
+axisActivitySum = 0.0
+for i = 0 to 2
+    axisActivitySum := axisActivitySum + array.get(axisPowers, i)
+
+// 历史平均水平计算
+historicalAxisActivity = request.security(syminfo.tickerid, selectedTimeframe, ta.sma(axisActivitySum, adjustedLookback * 3), barmerge.gaps_off, barmerge.lookahead_off)
+
+// 相对活跃度 - 当前与历史比值
+relativeAxisActivity = axisActivitySum / math.max(historicalAxisActivity, 0.001)
+
+// 波动率异常检测
+volatilityAnomaly = getVolatilityFactor() > 1.5 * eventSensitivity
+
+// 改进地缘事件检测 - 降低阈值以更容易触发
+isGeopoliticalEvent = relativeAxisActivity > alertThreshold * (1 - eventSensitivity) or  // 使用敏感度调整阈值
+                     volatilityAnomaly or
+                     maxAxisPower > 0.8 * eventSensitivity or  // 使用敏感度调整阈值
+                     math.abs(usaVsChinaAxis - usaVsChinaAxis[1]) > 0.4 * eventSensitivity or
+                     math.abs(web3VsWeb2Axis - web3VsWeb2Axis[1]) > 0.4 * eventSensitivity
+
+// 地缘事件类型分类
+geopoliticalEventType = "未检测到事件"
+if isGeopoliticalEvent
+    if maxAxisIdx == 0
+        geopoliticalEventType := "贸易/技术冲突"
+    else if maxAxisIdx == 1
+        geopoliticalEventType := "地缘政治紧张"
+    else if maxAxisIdx == 2
+        geopoliticalEventType := "监管/生态变化"
+    else
+        geopoliticalEventType := "市场异常波动"
+
+// ===== 改进的活跃会话检测 =====
+// 检测是否有多个活跃会话（交叉时段）
+activeSessions = array.new_bool(6)
+array.set(activeSessions, 0, inSession(usaStart, usaEnd))
+array.set(activeSessions, 1, inSession(euStart, euEnd))
+array.set(activeSessions, 2, inSession(asiaStart, asiaEnd))
+array.set(activeSessions, 3, inSession(russiaStart, russiaEnd))
+array.set(activeSessions, 4, inSession(meStart, meEnd))
+array.set(activeSessions, 5, inSession(offshoreStart, offshoreEnd))
+
+// 计算活跃会话数量
+activeCount = 0
+activeSessionIdx = -1
+for i = 0 to 5
+    if array.get(activeSessions, i)
+        activeCount := activeCount + 1
+        // 如果是第一个活跃会话，记录下索引
+        if activeCount == 1
+            activeSessionIdx := i
+
+// 确定当前会话类型
+activeSession = "无活跃时段"
+if activeCount == 1 and activeSessionIdx >= 0
+    // 单一活跃会话
+    activeSession := array.get(campNames, activeSessionIdx) + "时段"
+else if activeCount > 1
+    // 交叉时段 - 识别具体的交叉
+    crossingRegions = ""
+    crossingCount = 0
+    for i = 0 to 5
+        if array.get(activeSessions, i) and crossingCount < 2  // 最多显示两个
+            if crossingCount > 0
+                crossingRegions := crossingRegions + "/"
+            crossingRegions := crossingRegions + array.get(campNames, i)
+            crossingCount := crossingCount + 1
+
+    if crossingCount > 2
+        crossingRegions := crossingRegions + "/..."
+
+    activeSession := "交叉时段：" + crossingRegions
+
+// ===== 颜色定义 =====
+bullColor = color.rgb(76, 175, 80, 70)   // 绿色
+bearColor = color.rgb(255, 82, 82, 70)   // 红色
+
+campColors = array.new_color(6)
+array.set(campColors, 0, color.rgb(0, 91, 150))   // 美国蓝
+array.set(campColors, 1, color.rgb(0, 51, 153))   // 欧盟蓝
+array.set(campColors, 2, color.rgb(255, 51, 0))   // 东亚红
+array.set(campColors, 3, color.rgb(180, 0, 0))    // 俄罗斯红
+array.set(campColors, 4, color.rgb(0, 153, 153))  // 中东青
+array.set(campColors, 5, color.rgb(102, 0, 204))  // 离岸紫
+
+// 交叉时段的特殊颜色
+crossingColor = color.rgb(255, 165, 0)  // 橙色，表示交叉
+
+// ===== 可视化展示 =====
+// 初始化标签数组
+var label[] eventLabels = array.new_label()
+var label[] sessionLabels = array.new_label()
+var label[] whaleLabels = array.new_label()
+
+// 清除旧标签 - 确保在正确的位置进行
+if barstate.islast
+    // 限制事件标签数量
+    while array.size(eventLabels) > maxLabels
+        if array.size(eventLabels) > 0
+            label.delete(array.get(eventLabels, 0))
+            array.remove(eventLabels, 0)
+
+    // 限制会话标签数量
+    while array.size(sessionLabels) > maxLabels
+        if array.size(sessionLabels) > 0
+            label.delete(array.get(sessionLabels, 0))
+            array.remove(sessionLabels, 0)
+
+    // 限制主力活动标签数量
+    while array.size(whaleLabels) > maxLabels
+        if array.size(whaleLabels) > 0
+            label.delete(array.get(whaleLabels, 0))
+            array.remove(whaleLabels, 0)
+
+// 生成诱惑状态文本
+getTrapStatusText(trapScore, trapType) =>
+    string statusText = ""
+    if trapScore >= 85
+        statusText := "⚠️ 极度警惕"
+    else if trapScore >= trapThreshold
+        statusText := "⚠️ 需要警惕"
+    else if trapScore >= 50
+        statusText := "⚡ 密切关注"
+    else
+        statusText := "✅ 正常市场"
+    statusText
+
+
+// 显示左上角简要信息 - 添加顶部边距
+if barstate.islast and showMainInfo
+    // 计算需要的行数
+    rows = 3 // 基础地缘信息
+    if showTrapInfo
+        rows := rows + 3
+    if showWhaleInfo
+        rows := rows + 3
+
+    // 创建信息表格 - 使用空白行来添加顶部边距
+    marginRows = math.max(math.round(topMargin / 10), 1)
+    totalRows = rows + marginRows
+    infoTable = table.new(position.top_left, 2, totalRows, color.rgb(0, 0, 0, 0), color.white, 1, color.rgb(0, 0, 0, 0), 1)
+
+    // 添加空白行作为顶部边距
+    for i = 0 to marginRows - 1
+        table.cell(infoTable, 0, i, "", bgcolor=color.rgb(0, 0, 0, 0))
+        table.cell(infoTable, 1, i, "", bgcolor=color.rgb(0, 0, 0, 0))
+
+    // 当前行索引，从边距后开始
+    currentRow = marginRows
+
+    // 表格填充 - 地缘主导信息
+    table.cell(infoTable, 0, currentRow, "地缘主导", text_color=color.white, bgcolor=color.rgb(33, 33, 33, 90), text_size=size.small)
+    table.cell(infoTable, 1, currentRow, "状态", text_color=color.white, bgcolor=color.rgb(33, 33, 33, 90), text_size=size.small)
+    currentRow := currentRow + 1
+
+    table.cell(infoTable, 0, currentRow, "当前阵营", text_color=color.white, text_size=size.small)
+
+    // 获取当前力量方向和强度
+    netPower = maxPowerIdx >= 0 ? array.get(campPowers, maxPowerIdx) : 0
+    directionSymbol = netPower > 0 ? "↑" : netPower < 0 ? "↓" : "-"
+    powerStrength = math.abs(netPower) > 1.5 ? "强" : math.abs(netPower) > 0.8 ? "中" : "弱"
+
+    // 设置单元格颜色和内容
+    tableColor = maxPowerIdx >= 0 ? color.new(array.get(campColors, maxPowerIdx), 90) : color.gray
+    table.cell(infoTable, 1, currentRow, dominantCamp + " " + directionSymbol + powerStrength,
+               text_color=netPower > 0 ? color.rgb(0, 255, 0) : color.rgb(255, 0, 0),
+               bgcolor=tableColor, text_size=size.small)
+    currentRow := currentRow + 1
+
+    // 主导对立轴信息
+    table.cell(infoTable, 0, currentRow, "关键对立轴", text_color=color.white, text_size=size.small)
+    table.cell(infoTable, 1, currentRow, isGeopoliticalEvent ? "⚠️ " + dominantAxis : dominantAxis + ": " + dominantDirection,
+               text_color=isGeopoliticalEvent ? color.rgb(255, 255, 0) : color.white, text_size=size.small)
+    currentRow := currentRow + 1
+
+    // 添加市场诱惑力分析
+    if showTrapInfo
+        // 诱惑分析标题
+        table.cell(infoTable, 0, currentRow, "诱惑分析", text_color=color.white, bgcolor=color.rgb(33, 33, 33, 90), text_size=size.small)
+        table.cell(infoTable, 1, currentRow, "状态", text_color=color.white, bgcolor=color.rgb(33, 33, 33, 90), text_size=size.small)
+        currentRow := currentRow + 1
+
+        // 诱惑类型和得分
+        trapColor = trapType == "买入诱惑" ? buyTrapColor : trapType == "卖出诱惑" ? sellTrapColor : neutralTrapColor
+        table.cell(infoTable, 0, currentRow, "市场诱惑", text_color=color.white, text_size=size.small)
+        table.cell(infoTable, 1, currentRow, trapType + ": " + str.tostring(math.round(trapScore)) + "%",
+                  text_color=color.white, bgcolor=color.new(trapColor, 70), text_size=size.small)
+        currentRow := currentRow + 1
+
+        // 诱惑状态
+        statusText = getTrapStatusText(trapScore, trapType)
+        statusColor = trapScore >= 85 ? color.rgb(255, 23, 68, 90) :
+                     trapScore >= trapThreshold ? color.new(trapColor, 90) :
+                     trapScore >= 50 ? color.rgb(255, 193, 7, 90) : color.rgb(76, 175, 80, 90)
+
+        table.cell(infoTable, 0, currentRow, "提示", text_color=color.white, text_size=size.small)
+        table.cell(infoTable, 1, currentRow, statusText,
+                  text_color=trapScore >= trapThreshold ? color.white : color.silver,
+                  bgcolor=statusColor, text_size=size.small)
+        currentRow := currentRow + 1
+
+    // 添加主力庄家分析
+    if showWhaleInfo
+        // 获取主力分析结果
+        [whaleType, whaleColor, whaleScore, whaleBullish] = classifyWhaleType()
+        [whaleMomentum, whaleMomentumEmoji, _] = calculateWhaleMomentum()
+
+        // 主力分析标题
+        table.cell(infoTable, 0, currentRow, "主力分析", text_color=color.white, bgcolor=color.rgb(33, 33, 33, 90), text_size=size.small)
+        table.cell(infoTable, 1, currentRow, "状态", text_color=color.white, bgcolor=color.rgb(33, 33, 33, 90), text_size=size.small)
+        currentRow := currentRow + 1
+
+        // 主力类型和分数
+        table.cell(infoTable, 0, currentRow, "主力类型", text_color=color.white, text_size=size.small)
+        table.cell(infoTable, 1, currentRow, whaleType,
+                  text_color=color.white, bgcolor=color.new(whaleColor, 70), text_size=size.small)
+        currentRow := currentRow + 1
+
+        // 主力活跃度
+        whaleActiveStatus = whaleScore >= 80 ? "极度活跃" :
+                           whaleScore >= 60 ? "明显活动" :
+                           whaleScore >= 40 ? "轻微活动" : "无明显活动"
+
+        whaleStatusColor = whaleScore >= 80 ? color.rgb(255, 0, 0, 90) :
+                          whaleScore >= 60 ? color.rgb(255, 165, 0, 90) :
+                          whaleScore >= 40 ? color.rgb(255, 255, 0, 90) :
+                          color.rgb(100, 100, 100, 90)
+
+        table.cell(infoTable, 0, currentRow, "活跃状态", text_color=color.white, text_size=size.small)
+        table.cell(infoTable, 1, currentRow, whaleActiveStatus + " " + whaleMomentumEmoji,
+                  text_color=whaleScore >= 40 ? color.white : color.silver,
+                  bgcolor=whaleStatusColor, text_size=size.small)
+
+// 显示阵营力量热力图（整合时区活跃状态）
+if barstate.islast and showHeatmap
+    // 创建热力图表格 - 增加一列用于显示时区状态
+    heatmapTable = table.new(position.bottom_right, 4, 7, color.rgb(0, 0, 0, 70), color.white, 1, color.rgb(0, 0, 0, 0), 1)
+
+    // 表头
+    table.cell(heatmapTable, 0, 0, "阵营", text_color=color.white, bgcolor=color.rgb(33, 33, 33, 90), text_size=size.small)
+    table.cell(heatmapTable, 1, 0, "时区状态", text_color=color.white, bgcolor=color.rgb(33, 33, 33, 90), text_size=size.small)
+    table.cell(heatmapTable, 2, 0, "多方力量", text_color=color.white, bgcolor=color.rgb(33, 33, 33, 90), text_size=size.small)
+    table.cell(heatmapTable, 3, 0, "空方力量", text_color=color.white, bgcolor=color.rgb(33, 33, 33, 90), text_size=size.small)
+
+    // 各阵营力量热力图
+    // 1. 美国主导阵营
+    table.cell(heatmapTable, 0, 1, "美国主导阵营", text_color=color.white, bgcolor=color.new(array.get(campColors, 0), 70), text_size=size.small)
+    isActive = array.get(activeSessions, 0)
+    timeInfo = formatUTCTime(usaStart) + "-" + formatUTCTime(usaEnd)
+    table.cell(heatmapTable, 1, 1, isActive ? "● 活跃 " + timeInfo : "○ " + timeInfo,
+               text_color=isActive ? color.rgb(0, 255, 0) : color.gray, text_size=size.small)
+
+    bullIntensity = math.min(usa_bull * 100, 100)
+    bearIntensity = math.min(usa_bear * 100, 100)
+    table.cell(heatmapTable, 2, 1, str.tostring(math.round(usa_bull, 2)),
+               bgcolor=color.rgb(0, math.round(bullIntensity * 2.55), 0, 70),
+               text_color=color.white, text_size=size.small)
+    table.cell(heatmapTable, 3, 1, str.tostring(math.round(usa_bear, 2)),
+               bgcolor=color.rgb(math.round(bearIntensity * 2.55), 0, 0, 70),
+               text_color=color.white, text_size=size.small)
+
+    // 2. 欧盟/北欧
+    table.cell(heatmapTable, 0, 2, "欧盟/北欧", text_color=color.white, bgcolor=color.new(array.get(campColors, 1), 70), text_size=size.small)
+    isActive := array.get(activeSessions, 1)
+    timeInfo := formatUTCTime(euStart) + "-" + formatUTCTime(euEnd)
+    table.cell(heatmapTable, 1, 2, isActive ? "● 活跃 " + timeInfo : "○ " + timeInfo,
+               text_color=isActive ? color.rgb(0, 255, 0) : color.gray, text_size=size.small)
+
+    bullIntensity := math.min(eu_bull * 100, 100)
+    bearIntensity := math.min(eu_bear * 100, 100)
+    table.cell(heatmapTable, 2, 2, str.tostring(math.round(eu_bull, 2)),
+               bgcolor=color.rgb(0, math.round(bullIntensity * 2.55), 0, 70),
+               text_color=color.white, text_size=size.small)
+    table.cell(heatmapTable, 3, 2, str.tostring(math.round(eu_bear, 2)),
+               bgcolor=color.rgb(math.round(bearIntensity * 2.55), 0, 0, 70),
+               text_color=color.white, text_size=size.small)
+
+    // 3. 东亚资本圈
+    table.cell(heatmapTable, 0, 3, "东亚资本圈", text_color=color.white, bgcolor=color.new(array.get(campColors, 2), 70), text_size=size.small)
+    isActive := array.get(activeSessions, 2)
+    timeInfo := formatUTCTime(asiaStart) + "-" + formatUTCTime(asiaEnd)
+    table.cell(heatmapTable, 1, 3, isActive ? "● 活跃 " + timeInfo : "○ " + timeInfo,
+               text_color=isActive ? color.rgb(0, 255, 0) : color.gray, text_size=size.small)
+
+    bullIntensity := math.min(asia_bull * 100, 100)
+    bearIntensity := math.min(asia_bear * 100, 100)
+    table.cell(heatmapTable, 2, 3, str.tostring(math.round(asia_bull, 2)),
+               bgcolor=color.rgb(0, math.round(bullIntensity * 2.55), 0, 70),
+               text_color=color.white, text_size=size.small)
+    table.cell(heatmapTable, 3, 3, str.tostring(math.round(asia_bear, 2)),
+               bgcolor=color.rgb(math.round(bearIntensity * 2.55), 0, 0, 70),
+               text_color=color.white, text_size=size.small)
+
+    // 4. 俄罗斯-独联体
+    table.cell(heatmapTable, 0, 4, "俄罗斯-独联体", text_color=color.white, bgcolor=color.new(array.get(campColors, 3), 70), text_size=size.small)
+    isActive := array.get(activeSessions, 3)
+    timeInfo := formatUTCTime(russiaStart) + "-" + formatUTCTime(russiaEnd)
+    table.cell(heatmapTable, 1, 4, isActive ? "● 活跃 " + timeInfo : "○ " + timeInfo,
+               text_color=isActive ? color.rgb(0, 255, 0) : color.gray, text_size=size.small)
+
+    bullIntensity := math.min(russia_bull * 100, 100)
+    bearIntensity := math.min(russia_bear * 100, 100)
+    table.cell(heatmapTable, 2, 4, str.tostring(math.round(russia_bull, 2)),
+               bgcolor=color.rgb(0, math.round(bullIntensity * 2.55), 0, 70),
+               text_color=color.white, text_size=size.small)
+    table.cell(heatmapTable, 3, 4, str.tostring(math.round(russia_bear, 2)),
+               bgcolor=color.rgb(math.round(bearIntensity * 2.55), 0, 0, 70),
+               text_color=color.white, text_size=size.small)
+
+    // 5. 中东新兴力量
+    table.cell(heatmapTable, 0, 5, "中东新兴力量", text_color=color.white, bgcolor=color.new(array.get(campColors, 4), 70), text_size=size.small)
+    isActive := array.get(activeSessions, 4)
+    timeInfo := formatUTCTime(meStart) + "-" + formatUTCTime(meEnd)
+    table.cell(heatmapTable, 1, 5, isActive ? "● 活跃 " + timeInfo : "○ " + timeInfo,
+               text_color=isActive ? color.rgb(0, 255, 0) : color.gray, text_size=size.small)
+
+    bullIntensity := math.min(me_bull * 100, 100)
+    bearIntensity := math.min(me_bear * 100, 100)
+    table.cell(heatmapTable, 2, 5, str.tostring(math.round(me_bull, 2)),
+               bgcolor=color.rgb(0, math.round(bullIntensity * 2.55), 0, 70),
+               text_color=color.white, text_size=size.small)
+    table.cell(heatmapTable, 3, 5, str.tostring(math.round(me_bear, 2)),
+               bgcolor=color.rgb(math.round(bearIntensity * 2.55), 0, 0, 70),
+               text_color=color.white, text_size=size.small)
+
+    // 6. 离岸金融枢纽
+    table.cell(heatmapTable, 0, 6, "离岸金融枢纽", text_color=color.white, bgcolor=color.new(array.get(campColors, 5), 70), text_size=size.small)
+    isActive := array.get(activeSessions, 5)
+    timeInfo := formatUTCTime(offshoreStart) + "-" + formatUTCTime(offshoreEnd)
+    table.cell(heatmapTable, 1, 6, isActive ? "● 活跃 " + timeInfo : "○ " + timeInfo,
+               text_color=isActive ? color.rgb(0, 255, 0) : color.gray, text_size=size.small)
+
+    bullIntensity := math.min(offshore_bull * 100, 100)
+    bearIntensity := math.min(offshore_bear * 100, 100)
+    table.cell(heatmapTable, 2, 6, str.tostring(math.round(offshore_bull, 2)),
+               bgcolor=color.rgb(0, math.round(bullIntensity * 2.55), 0, 70),
+               text_color=color.white, text_size=size.small)
+    table.cell(heatmapTable, 3, 6, str.tostring(math.round(offshore_bear, 2)),
+               bgcolor=color.rgb(math.round(bearIntensity * 2.55), 0, 0, 70),
+               text_color=color.white, text_size=size.small)
+
+// ===== 地缘事件标签创建 - 修复版 =====
+// 跟踪上次事件标签
+var int lastEventBar = 0
+var string lastEventType = ""
+
+// 改进的地缘事件标签逻辑 - 确保一定会显示
+if showEventLabels and barstate.isrealtime and isGeopoliticalEvent
+    // 创建一个立即可见的事件标签
+    if geopoliticalEventType != "未检测到事件" and (bar_index - lastEventBar > 5 or geopoliticalEventType != lastEventType)
+        eventLabel = label.new(bar_index, high, "⚠️\n" + geopoliticalEventType,
+                      color=color.rgb(255, 0, 0, 80),
+                      style=label.style_label_down,
+                      textcolor=color.white,
+                      size=size.normal)
+        array.push(eventLabels, eventLabel)
+        lastEventBar := bar_index
+        lastEventType := geopoliticalEventType
+
+// 定期在图表上添加地缘事件标记 - 确保一些事件总是被标记
+periodicCheck = bar_index % 20 == 0  // 每20根K线检查一次
+if periodicCheck and showEventLabels and isGeopoliticalEvent and bar_index - lastEventBar > 20
+    eventLabel = label.new(bar_index, high, "🔍\n" + geopoliticalEventType,
+                  color=color.rgb(255, 153, 0, 80),
+                  style=label.style_label_down,
+                  textcolor=color.white,
+                  size=size.normal)
+    array.push(eventLabels, eventLabel)
+    lastEventBar := bar_index
+    lastEventType := geopoliticalEventType
+
+// 在图表上标记虚假突破（诱惑分析标记）
+plotshape(falseBreakoutUp, "虚假上突破", style=shape.triangledown, location=location.abovebar, color=sellTrapColor, size=size.small)
+plotshape(falseBreakoutDown, "虚假下突破", style=shape.triangleup, location=location.belowbar, color=buyTrapColor, size=size.small)
+
+// 在图表上标记主力活动
+if enableWhaleDetection and barstate.isconfirmed
+    [whaleType, whaleColor, whaleScore, whaleBullish] = classifyWhaleType()
+
+    // 仅标记明显的主力活动
+    if whaleScore >= 75
+        direction = whaleBullish ? "▲ " : "▼ "
+        markerText = direction + whaleType
+        markerStyle = whaleBullish ? label.style_label_up : label.style_label_down
+        markerPos = whaleBullish ? low - ta.atr(14) * 0.5 : high + ta.atr(14) * 0.5
+
+        whaleMarker = label.new(bar_index, markerPos, markerText,
+                               color=color.new(whaleColor, 60),
+                               style=markerStyle,
+                               textcolor=color.white,
+                               size=size.small)
+        array.push(whaleLabels, whaleMarker)
+
+// ===== 会话切换标签 - 改进版 =====
+var int lastSessionBar = 0
+var string lastSessionType = ""
+
+// 只在会话变化时添加新标记
+if showSessionLabels and barstate.isrealtime and activeSession != lastSessionType and bar_index - lastSessionBar > 10
+    // 确定标签颜色 - 交叉时段使用特殊颜色
+    sessionColor = activeCount > 1 ? crossingColor :
+                   activeSessionIdx >= 0 ? array.get(campColors, activeSessionIdx) : color.gray
+
+    sessionLabel = label.new(bar_index, low, "🕒\n" + activeSession,
+                         color=color.new(sessionColor, 80),
+                         style=label.style_label_up,
+                         textcolor=color.white,
+                         size=size.small)
+    array.push(sessionLabels, sessionLabel)
+    lastSessionBar := bar_index
+    lastSessionType := activeSession
+
+// 确保交叉时段强制显示标签
+forceSessionLabel = barstate.isrealtime and activeCount > 1 and bar_index % 15 == 0
+if forceSessionLabel and showSessionLabels and bar_index - lastSessionBar > 15
+    sessionLabel = label.new(bar_index, low, "⚡\n" + activeSession,
+                         color=color.new(crossingColor, 70),
+                         style=label.style_label_up,
+                         textcolor=color.white,
+                         size=size.small)
+    array.push(sessionLabels, sessionLabel)
+    lastSessionBar := bar_index
+    lastSessionType := activeSession
+
+// 警报条件 - 包括市场诱惑警报和主力活动警报
+if trapActive and not trapActive[1]
+    alert("市场" + trapType + "警报: " + str.tostring(math.round(trapScore)) + "%", alert.freq_once_per_bar)
+
+if isGeopoliticalEvent and not isGeopoliticalEvent[1]
+    alert("地缘政治事件警报: " + geopoliticalEventType, alert.freq_once_per_bar)
+
+// 主力活动警报
+[whaleType, _, whaleScore, whaleBullish] = classifyWhaleType()
+if whaleScore >= 75 and whaleScore[1] < 75
+    direction = whaleBullish ? "做多" : "做空"
+    alert("主力活动警报: " + whaleType + " 分数:" + str.tostring(math.round(whaleScore)) + "%", alert.freq_once_per_bar)
