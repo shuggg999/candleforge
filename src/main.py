@@ -9,6 +9,7 @@ from datetime import datetime, timezone
 from typing import Dict, Any, Optional
 
 from fastapi import FastAPI, HTTPException
+from fastapi.encoders import jsonable_encoder
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
@@ -538,13 +539,15 @@ async def health_check():
         logger.error(f"Health check get_status failed: {exc}")
         return JSONResponse(
             status_code=503,
-            content={"status": "unhealthy", "error": str(exc)},
+            content=jsonable_encoder({"status": "unhealthy", "error": str(exc)}),
         )
 
     if not status.get("running"):
         return JSONResponse(
             status_code=503,
-            content={"status": "unhealthy", "error": "Service not running", "details": status},
+            content=jsonable_encoder(
+                {"status": "unhealthy", "error": "Service not running", "details": status}
+            ),
         )
 
     health_status = "healthy"
@@ -603,9 +606,12 @@ async def health_check():
     if recovery_health.get("status") != "ok":
         health_status = "degraded"
 
+    # status dict may carry datetime values via collector_manager.get_status()
+    # (last_message_time etc.); JSONResponse doesn't run FastAPI's encoder by
+    # default, so do it explicitly.
     return JSONResponse(
         status_code=200 if health_status == "healthy" else 503,
-        content={"status": health_status, "details": status},
+        content=jsonable_encoder({"status": health_status, "details": status}),
     )
 
 

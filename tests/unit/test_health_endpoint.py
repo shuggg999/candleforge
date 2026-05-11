@@ -246,6 +246,49 @@ def test_health_recovery_subprobe_shape():
 # --- additional regression: no duplicate /health route -----------------------
 
 
+def test_health_serializes_datetime_in_collectors_status():
+    """Regression: 2026-05-12 deploy crashed with `Object of type datetime is not
+    JSON serializable` because `collector_manager.get_status()` returns nested
+    dicts containing `last_message_time: datetime` values. JSONResponse does NOT
+    apply FastAPI's encoder automatically — the handler MUST `jsonable_encoder()`
+    its content before constructing the response.
+    """
+    now = datetime.now(timezone.utc)
+
+    async def fake_get_status_with_datetime() -> Dict[str, Any]:
+        return {
+            "running": True,
+            "database": "healthy",
+            "collectors": {
+                "binance_primary": {
+                    "is_running": True,
+                    "last_message_time": now,  # <-- raw datetime, must serialize
+                    "stats": {"started_at": now, "messages_received": 1000},
+                },
+            },
+            "recovery": "running",
+        }
+
+    with patched_service() as (app, svc):
+        svc.get_status = fake_get_status_with_datetime
+        client = TestClient(app)
+        r = client.get("/api/v1/health")
+
+    # Whatever the verdict, the response MUST be valid JSON (not a 500 from
+    # serialization). 200 or 503 — both fine. 500 means we regressed.
+    assert r.status_code != 500, (
+        f"datetime in collectors.last_message_time crashed serialization; "
+        f"body={r.text[:300]}"
+    )
+    body = r.json()
+    assert "details" in body
+    # The datetime value should now be an ISO string after jsonable_encoder
+    nested = body["details"]["collectors"]["binance_primary"]["last_message_time"]
+    assert isinstance(nested, str) and "T" in nested, (
+        f"datetime should serialize to ISO string, got {nested!r}"
+    )
+
+
 def test_only_one_health_route_registered():
     """Spec (Module Wiring Convention scenario): exactly one handler for /api/v1/health,
     defined in src/main.py — routes.py MUST NOT register its own /health.
