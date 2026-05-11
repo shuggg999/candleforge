@@ -197,13 +197,15 @@ class DataService:
             critical=True
         )
         
-        # 注册收集器健康检查
-        auto_recovery.register_component(
-            name="data_collectors", 
-            health_checker=self._check_collectors_health,
-            recovery_handler=self._recover_collectors,
-            critical=True
-        )
+        # 注册收集器健康检查 (skip when proxy is set — collectors are intentionally
+        # not started, recovery service handles data via REST polling)
+        if not settings.BINANCE_PROXY_URL:
+            auto_recovery.register_component(
+                name="data_collectors",
+                health_checker=self._check_collectors_health,
+                recovery_handler=self._recover_collectors,
+                critical=True
+            )
         
         # 注册恢复服务健康检查
         auto_recovery.register_component(
