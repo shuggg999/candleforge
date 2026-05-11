@@ -201,10 +201,17 @@ class BinanceCollector(ExchangeCollector):
             stream_params = "/".join(streams)
             ws_url = f"{self.ws_base_url}{stream_params}"
             
-            logger.info(f"🔌 Creating Binance WebSocket connection {client_key} with {len(streams)} streams")
+            # websockets 14+ supports proxy= kwarg (requires python-socks[asyncio]
+            # for SOCKS5). Both pinned in the Dockerfile.
+            connect_kwargs = {}
+            proxy = settings.BINANCE_PROXY_URL or None
+            if proxy:
+                connect_kwargs["proxy"] = proxy
+                logger.info(f"🔌 Creating WS {client_key} via proxy {proxy} ({len(streams)} streams)")
+            else:
+                logger.info(f"🔌 Creating WS {client_key} direct ({len(streams)} streams)")
 
-            # Create WebSocket connection (direct, no proxy)
-            websocket = await websockets.connect(ws_url)
+            websocket = await websockets.connect(ws_url, **connect_kwargs)
 
             return websocket
             

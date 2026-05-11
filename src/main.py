@@ -95,18 +95,10 @@ class DataService:
         from src.api import routes
         routes.set_managers(self.db_manager, self.collector_manager)
         
-        # Start collectors (WS) — skipped when BINANCE_PROXY_URL is set
-        # (websockets 14.2 asyncio.connect doesn't support SOCKS; recovery
-        # service tops up via REST every 60s, ~60-300s lag, acceptable for
-        # 5-minute detection cycles).
-        if settings.BINANCE_PROXY_URL:
-            logger.info(
-                "⚠️ Skipping collector start_all: BINANCE_PROXY_URL is set; "
-                "data flows in via recovery service REST polling instead"
-            )
-        else:
-            logger.info("▶️ Starting data collectors...")
-            await self.collector_manager.start_all()
+        # Start collectors (WS via proxy when BINANCE_PROXY_URL is set;
+        # websockets 14+ + python-socks[asyncio] handle SOCKS5 transparently)
+        logger.info("▶️ Starting data collectors...")
+        await self.collector_manager.start_all()
         
         # Start recovery service - TEMPORARILY DISABLED
         # asyncio.create_task(self.recovery_service.start())
@@ -197,15 +189,13 @@ class DataService:
             critical=True
         )
         
-        # 注册收集器健康检查 (skip when proxy is set — collectors are intentionally
-        # not started, recovery service handles data via REST polling)
-        if not settings.BINANCE_PROXY_URL:
-            auto_recovery.register_component(
-                name="data_collectors",
-                health_checker=self._check_collectors_health,
-                recovery_handler=self._recover_collectors,
-                critical=True
-            )
+        # 注册收集器健康检查
+        auto_recovery.register_component(
+            name="data_collectors",
+            health_checker=self._check_collectors_health,
+            recovery_handler=self._recover_collectors,
+            critical=True
+        )
         
         # 注册恢复服务健康检查
         auto_recovery.register_component(

@@ -18,6 +18,11 @@ RUN conda env create -f environment.yml
 # Make RUN commands use the new environment
 SHELL ["conda", "run", "-n", "freqtrade-data-service", "/bin/bash", "-c"]
 
+# Upgrade websockets to 14+ (proxy= kwarg) + python-socks[asyncio] (SOCKS5 backend).
+# Without python-socks the proxy kwarg falls through to asyncio.create_connection
+# which doesn't accept it. Separate layer keeps the heavy conda env layer cached.
+RUN pip install --no-cache-dir 'websockets>=14,<16' 'python-socks[asyncio]>=2.4'
+
 # Copy application code
 COPY src/ ./src/
 COPY config/ ./config/
