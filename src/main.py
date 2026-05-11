@@ -550,9 +550,24 @@ async def health_check():
             ),
         )
 
+    # Health verdict ladder:
+    #   healthy   — all sub-probes ok          → HTTP 200
+    #   degraded  — some sub-probe degraded    → HTTP 200 (service usable)
+    #   unhealthy — any sub-probe failed       → HTTP 503 (service unusable)
+    # Treat `database != healthy` as degraded (we still got status back, so ClickHouse
+    # is reachable enough to report); a hard ClickHouse failure raises in get_status()
+    # and is caught above.
     health_status = "healthy"
+
+    def _absorb(sub_status: Optional[str]) -> None:
+        nonlocal health_status
+        if sub_status == "failed":
+            health_status = "unhealthy"
+        elif sub_status != "ok" and health_status == "healthy":
+            health_status = "degraded"
+
     if status.get("database") != "healthy":
-        health_status = "degraded"
+        _absorb("degraded")
 
     # Module sub-probes — each wrapped so one failure doesn't crash /health.
     classification_health = _safe_subprobe(
@@ -563,8 +578,7 @@ async def health_check():
         },
     )
     status["classification"] = classification_health
-    if classification_health.get("status") != "ok":
-        health_status = "degraded"
+    _absorb(classification_health.get("status"))
 
     detection_health = _safe_subprobe(
         "detection",
@@ -574,8 +588,7 @@ async def health_check():
         },
     )
     status["detection"] = detection_health
-    if detection_health.get("status") != "ok":
-        health_status = "degraded"
+    _absorb(detection_health.get("status"))
 
     alerts_health = _safe_subprobe(
         "alerts",
@@ -585,8 +598,7 @@ async def health_check():
         },
     )
     status["alerts"] = alerts_health
-    if alerts_health.get("status") != "ok":
-        health_status = "degraded"
+    _absorb(alerts_health.get("status"))
 
     # WebSocket collectors — aggregate WS-client state across all collectors
     ws_health = _safe_subprobe(
@@ -594,8 +606,7 @@ async def health_check():
         lambda: _compute_ws_collectors_health(service.collector_manager),
     )
     status["ws_collectors"] = ws_health
-    if ws_health.get("status") != "ok":
-        health_status = "degraded"
+    _absorb(ws_health.get("status"))
 
     # Recovery loop liveness — replaces the legacy `recovery: "running"|"stopped"` string.
     recovery_health = _safe_subprobe(
@@ -603,14 +614,13 @@ async def health_check():
         lambda: _compute_recovery_health(service.recovery_service),
     )
     status["recovery"] = recovery_health
-    if recovery_health.get("status") != "ok":
-        health_status = "degraded"
+    _absorb(recovery_health.get("status"))
 
     # status dict may carry datetime values via collector_manager.get_status()
     # (last_message_time etc.); JSONResponse doesn't run FastAPI's encoder by
     # default, so do it explicitly.
     return JSONResponse(
-        status_code=200 if health_status == "healthy" else 503,
+        status_code=503 if health_status == "unhealthy" else 200,
         content=jsonable_encoder({"status": health_status, "details": status}),
     )
 

@@ -246,6 +246,42 @@ def test_health_recovery_subprobe_shape():
 # --- additional regression: no duplicate /health route -----------------------
 
 
+def test_health_returns_200_when_only_degraded():
+    """Spec: HTTP 503 means *unhealthy* (service unusable). HTTP 200 with
+    `status: "degraded"` means service is up but a sub-probe reports a
+    non-critical issue (e.g. recovery hasn't completed first cycle yet,
+    one WS client out of many is disconnected).
+
+    Without this distinction, docker's `curl -f` healthcheck flips the
+    container to unhealthy permanently even when the service is functional
+    — which was the symptom on jarvis 2026-05-12.
+    """
+    # ws_collectors reports "degraded" (one expected client missing)
+    now = datetime.now(timezone.utc)
+    c1 = MagicMock()
+    c1.websocket_clients = {"BTCUSDT@kline_1m": MagicMock()}
+    c1.connection_health = {
+        "BTCUSDT@kline_1m": {"status": "healthy", "last_message_time": now, "messages_count": 1, "symbols": set()},
+        "stale_client_key": {"status": "unhealthy", "last_message_time": None, "messages_count": 0, "symbols": set()},
+    }
+    mock_cm = MagicMock()
+    mock_cm.collectors = {"binance_primary": c1}
+
+    with patched_service(collector_manager=mock_cm) as (app, _):
+        client = TestClient(app)
+        r = client.get("/api/v1/health")
+
+    body = r.json()
+    assert body["details"]["ws_collectors"]["status"] == "degraded", (
+        f"sanity: ws_collectors should be degraded, got {body['details']['ws_collectors']}"
+    )
+    assert r.status_code == 200, (
+        f"degraded-only should return HTTP 200 (service usable), got {r.status_code}. "
+        f"This regression breaks docker healthcheck on jarvis."
+    )
+    assert body["status"] == "degraded", f"body.status should be 'degraded', got {body['status']!r}"
+
+
 def test_health_serializes_datetime_in_collectors_status():
     """Regression: 2026-05-12 deploy crashed with `Object of type datetime is not
     JSON serializable` because `collector_manager.get_status()` returns nested
