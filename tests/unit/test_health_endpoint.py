@@ -325,6 +325,46 @@ def test_health_serializes_datetime_in_collectors_status():
     )
 
 
+def test_health_nats_subprobe_shape():
+    """Spec (introduce-nats-event-bus / NATS Sub-Probe on /api/v1/health):
+    body.details MUST include 'nats' key with shape:
+    {status, connected, publish_failure_count, last_publish_age_seconds, disabled}
+    """
+    mock_pub = MagicMock()
+    mock_pub.health.return_value = {
+        "status": "ok",
+        "connected": True,
+        "publish_failure_count": 0,
+        "last_publish_age_seconds": 1.2,
+        "disabled": False,
+    }
+    with patched_service() as (app, svc):
+        svc.publisher = mock_pub
+        client = TestClient(app)
+        r = client.get("/api/v1/health")
+
+    body = r.json()
+    nats = body.get("details", {}).get("nats")
+    assert isinstance(nats, dict), f"body.details.nats missing or not dict: {nats!r}"
+    for k in ("status", "connected", "publish_failure_count", "last_publish_age_seconds", "disabled"):
+        assert k in nats, f"nats sub-probe missing {k!r}; got keys {sorted(nats.keys())}"
+    assert nats["status"] == "ok"
+    assert nats["connected"] is True
+
+
+def test_health_nats_subprobe_failed_when_no_publisher():
+    """When service.publisher is None, nats sub-probe reports failed (component not initialized)."""
+    with patched_service() as (app, svc):
+        svc.publisher = None
+        client = TestClient(app)
+        r = client.get("/api/v1/health")
+
+    body = r.json()
+    nats = body.get("details", {}).get("nats")
+    assert nats["status"] == "failed"
+    assert "not initialized" in nats.get("reason", "").lower()
+
+
 def test_only_one_health_route_registered():
     """Spec (Module Wiring Convention scenario): exactly one handler for /api/v1/health,
     defined in src/main.py — routes.py MUST NOT register its own /health.

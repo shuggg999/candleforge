@@ -33,6 +33,7 @@ from src.detection.thresholds import DEFAULT_THRESHOLDS, merge_thresholds, parse
 from src.scheduler import build_scheduler
 from src.alerts import Notifier, TelegramClient
 from src.alerts.api import router as alerts_router, set_notifier as set_alerts_singleton
+from src.events import NatsPublisher
 
 
 # Configure logger
@@ -62,6 +63,7 @@ class DataService:
         self.classifier: Optional[Classifier] = None
         self.detector: Optional[Detector] = None
         self.notifier: Optional[Notifier] = None
+        self.publisher: Optional[NatsPublisher] = None
         self.scheduler = None
         self.is_running = False
     
@@ -73,7 +75,23 @@ class DataService:
         logger.info("📊 Initializing ClickHouse connection...")
         self.db_manager = ClickHouseManager()
         await self.db_manager.initialize()
-        
+
+        # Initialize NATS event bus publisher (introduce-nats-event-bus).
+        # Attached to db_manager so successful inserts also broadcast to subscribers.
+        try:
+            self.publisher = NatsPublisher(
+                url=settings.NATS_URL, enabled=settings.NATS_ENABLE
+            )
+            await self.publisher.connect()
+            self.db_manager.set_publisher(self.publisher)
+            logger.info("📡 NATS publisher initialized (enabled={}, url={})",
+                        settings.NATS_ENABLE, settings.NATS_URL)
+        except Exception as exc:
+            # Publisher failure is non-fatal — the service keeps running
+            # without event-bus broadcasts (sub-probe will report degraded/failed).
+            logger.warning("NATS publisher init failed (non-fatal): {}", exc)
+            self.publisher = None
+
         # Initialize collector manager
         logger.info("📡 Initializing collectors...")
         self.collector_manager = CollectorManager(self.db_manager)
@@ -317,7 +335,14 @@ class DataService:
         
         if self.db_manager:
             await self.db_manager.close()
-        
+
+        # NATS publisher (introduce-nats-event-bus)
+        if self.publisher is not None:
+            try:
+                await self.publisher.close()
+            except Exception as e:
+                logger.warning(f"NATS publisher shutdown error: {e}")
+
         # 🗂️ Final log rotation before shutdown
         try:
             await log_manager.rotate_logs()
@@ -615,6 +640,17 @@ async def health_check():
     )
     status["recovery"] = recovery_health
     _absorb(recovery_health.get("status"))
+
+    # NATS event bus publisher (introduce-nats-event-bus).
+    nats_health = _safe_subprobe(
+        "nats",
+        lambda: service.publisher.health() if service.publisher is not None else {
+            "status": "failed",
+            "reason": "publisher not initialized",
+        },
+    )
+    status["nats"] = nats_health
+    _absorb(nats_health.get("status"))
 
     # status dict may carry datetime values via collector_manager.get_status()
     # (last_message_time etc.); JSONResponse doesn't run FastAPI's encoder by

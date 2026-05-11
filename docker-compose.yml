@@ -1,4 +1,28 @@
 services:
+  nats:
+    # NATS event bus with JetStream (introduce-nats-event-bus). Downstream
+    # consumers (volume-monitor, telegram-bot) subscribe to `ohlcv.>`.
+    image: nats:2.10-alpine
+    container_name: nats
+    platform: ${DOCKER_PLATFORM:-linux/arm64}
+    command:
+      - "-js"                          # enable JetStream
+      - "-sd"
+      - "/data"                        # JetStream file storage path
+      - "-m"
+      - "8222"                         # monitoring HTTP endpoint
+    ports:
+      - "${NATS_CLIENT_PORT:-4222}:4222"
+      - "${NATS_MONITOR_PORT:-8222}:8222"
+    volumes:
+      - nats-data:/data
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8222/healthz || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    restart: unless-stopped
+
   clickhouse:
     image: clickhouse/clickhouse-server:latest
     container_name: clickhouse-db
@@ -38,9 +62,13 @@ services:
     depends_on:
       clickhouse:
         condition: service_healthy
+      nats:
+        condition: service_healthy
     environment:
       - CLICKHOUSE_HOST=clickhouse-db
       - CLICKHOUSE_PORT=8123
+      - NATS_URL=${NATS_URL:-nats://nats:4222}
+      - NATS_ENABLE=${NATS_ENABLE:-true}
       - CLICKHOUSE_DATABASE=${CLICKHOUSE_DATABASE:-crypto_data}
       - LOG_LEVEL=${LOG_LEVEL:-INFO}
       - ENABLED_EXCHANGES=${ENABLED_EXCHANGES:-binance}
@@ -70,3 +98,7 @@ services:
       interval: 30s
       timeout: 10s
       retries: 3
+
+volumes:
+  nats-data:
+    # JetStream file storage for the NATS event bus.

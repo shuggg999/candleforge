@@ -144,6 +144,10 @@ class Settings(BaseSettings):
     TELEGRAM_PARSE_MODE: str = Field(default="Markdown", env="TELEGRAM_PARSE_MODE")
     TELEGRAM_PROXY_URL: str = Field(default="", env="TELEGRAM_PROXY_URL")
     ALERTS_DRY_RUN: bool = Field(default=False, env="ALERTS_DRY_RUN")
+
+    # NATS event bus (introduce-nats-event-bus)
+    NATS_URL: str = Field(default="nats://nats:4222", env="NATS_URL")
+    NATS_ENABLE: bool = Field(default=True, env="NATS_ENABLE")
     
     class Config:
         env_file = ".env"

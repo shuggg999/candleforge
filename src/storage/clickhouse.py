@@ -23,6 +23,9 @@ class ClickHouseManager:
         self.client: Optional[ChClient] = None
         self.session: Optional[ClientSession] = None
         self.is_connected = False
+        # NATS publisher attached via set_publisher() — used by _publish_after_insert
+        # to broadcast K-line events after each batch insert succeeds.
+        self._publisher = None  # type: Optional["NatsPublisher"]
         
         # 🎯 Memory-Optimized batch processing settings
         self._write_queue = asyncio.Queue(maxsize=500)   # Reduced from 20000 to 500 (大幅减少内存占用)
@@ -139,6 +142,30 @@ class ClickHouseManager:
         
         logger.info("👋 ClickHouse connection closed")
     
+    def set_publisher(self, publisher) -> None:
+        """Attach a NatsPublisher (or compatible) for post-insert event publish.
+
+        Called from src/main.py during lifespan startup, AFTER both the
+        ClickHouseManager and the publisher have been instantiated. Avoids a
+        circular import (storage doesn't need to know about events at module
+        load time).
+        """
+        self._publisher = publisher
+
+    async def _publish_after_insert(self, row: Dict[str, Any]) -> None:
+        """Fire-and-forget publish hook called once per inserted row.
+
+        Failures are swallowed inside `publisher.publish_kline()`; this wrapper
+        adds a defensive try/except so a publisher that does NOT honor the
+        contract still cannot break the insert path.
+        """
+        if self._publisher is None:
+            return
+        try:
+            await self._publisher.publish_kline(row)
+        except Exception as exc:  # noqa: BLE001 — fire-and-forget contract
+            logger.warning("ClickHouse post-insert publish hook raised (ignored): {}", exc)
+
     async def health_check(self) -> str:
         """🏥 Check database connectivity with robust health check"""
         try:
@@ -326,6 +353,12 @@ class ClickHouseManager:
                 *values
             )
             
+            # 📡 Publish each inserted row to NATS (fire-and-forget; no-op if no publisher attached).
+            # Done AFTER the INSERT succeeds so subscribers see only persisted data.
+            if self._publisher is not None:
+                for item in batch:
+                    await self._publish_after_insert(item)
+
             # 📈 Update performance metrics
             batch_duration = (datetime.now() - batch_start).total_seconds()
             self._batch_stats['total_batches'] += 1
