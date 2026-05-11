@@ -76,6 +76,8 @@ Any new business module placed under `src/<module>/` SHALL expose:
 
 Modules MUST NOT start background threads or open network sockets at import time.
 
+**单一 /health 路由**：所有 `/api/v1/health` 实现 MUST 集中在 `src/main.py` 中的单一 endpoint。`src/api/routes.py` 等 router 文件 MUST NOT 注册同路径的 endpoint —— FastAPI 先注册者优先，重复注册会**静默覆盖** main.py 的实现，使 sub-probe 失效。
+
 #### Scenario: Adding a new module surfaces in /health
 
 - **WHEN** a developer adds `src/classification/` following this convention
@@ -85,6 +87,16 @@ Modules MUST NOT start background threads or open network sockets at import time
 
 - **WHEN** `python -c "import src.main"` runs on a machine with no network and no ClickHouse
 - **THEN** the import succeeds without raising connection errors or starting threads
+
+#### Scenario: No duplicate /health route silently overrides main.py
+
+- **WHEN** automated check parses FastAPI app routes
+- **THEN** exactly one handler is registered for path `/api/v1/health`, defined in `src/main.py`, and `src/api/routes.py` does not declare `@router.get("/health")`
+
+#### Scenario: Sub-probe failure does not crash health endpoint
+
+- **WHEN** a sub-probe function (e.g. `classifier.health()`) raises an unexpected exception
+- **THEN** `/api/v1/health` still returns a JSON body with that sub-probe's value set to `{"status": "failed", "reason": <error string>}` and overall HTTP status 503, NOT a 500 internal server error
 
 ### Requirement: Repository Hygiene — gitignore Coverage
 
@@ -103,4 +115,27 @@ Code that has been replaced by a current implementation but kept for reference S
 
 - **WHEN** an automated check greps `src/` for `from docs.legacy` or `import docs.legacy`
 - **THEN** zero matches are found
+
+### Requirement: Per-Timeframe TTL Configuration
+
+`config/clickhouse/init.sql` 的 `ohlcv_futures` 表 TTL 子句 SHALL 为每个 timeframe 单独写一条 `WHERE timeframe = '<tf>'` 表达式，禁止使用 `WHERE timeframe IN (...)` 合并多个 timeframe。任何 timeframe 的 TTL 天数变更 MUST 只影响该 timeframe，不得殃及其他 timeframe。
+
+#### Scenario: 改 1h TTL 不应影响 15m
+
+- **WHEN** 一个开发者把 1h TTL 从 365 改为 180 天
+- **THEN** `git diff` 只显示 1h 那一条 `WHERE timeframe = '1h'` 表达式被修改，15m 那条 `WHERE timeframe = '15m'` 表达式完全未动
+
+#### Scenario: TTL 表达式与 .env 配置一致
+
+- **WHEN** 自动检查解析 `config/clickhouse/init.sql` 和 `.env.example` 里的 TTL 配置
+- **THEN** 对每个 timeframe，init.sql 中 `WHERE timeframe = '<tf>'` 表达式的 day 数与 `.env.example` 中 `TTL_<TF>=<days>` 数字一致（1m=7, 5m=30, 15m=90, 1h=365, 4h=365, 1d=1825）
+
+### Requirement: Production Table TTL Migration Documented
+
+任何修改 `config/clickhouse/init.sql` 的 TTL 表达式的 change SHALL 同时在 `scripts/migrations/` 提供一条 `ALTER TABLE crypto_data.ohlcv_futures MODIFY TTL ...` SQL 脚本，使得已存在的生产部署可以在不重建表的情况下应用新 TTL。
+
+#### Scenario: 已部署集群应用 TTL 修复
+
+- **WHEN** 一个 change 修改 init.sql TTL 后部署到 jarvis 上
+- **THEN** `scripts/migrations/<YYYY-MM-DD>-<change-id>.sql` 包含等价的 `ALTER TABLE ... MODIFY TTL` 语句，运维只需 `clickhouse-client < scripts/migrations/<file>.sql` 即可同步生产表 TTL，无需 drop / recreate / 数据丢失
 
