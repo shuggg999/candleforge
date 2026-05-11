@@ -123,6 +123,7 @@ class DataService:
                 tg_client = TelegramClient(
                     token=settings.TELEGRAM_BOT_TOKEN,
                     parse_mode=settings.TELEGRAM_PARSE_MODE,
+                    proxy=settings.TELEGRAM_PROXY_URL or None,
                 )
             self.notifier = Notifier(
                 ch_client=adapt_aiochclient(self.db_manager.client),

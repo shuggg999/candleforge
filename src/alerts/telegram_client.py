@@ -27,6 +27,7 @@ class TelegramClient:
         max_retries: int = 3,
         base_backoff: float = 2.0,
         transport: Optional[httpx.AsyncBaseTransport] = None,
+        proxy: Optional[str] = None,
     ) -> None:
         self._token = token
         self._parse_mode = parse_mode
@@ -35,6 +36,7 @@ class TelegramClient:
         self._max_retries = max_retries
         self._base_backoff = base_backoff
         self._transport = transport  # for tests; normally None
+        self._proxy = proxy  # e.g. socks5://host.docker.internal:10808 for blocked regions
 
     @property
     def base_url(self) -> str:
@@ -50,6 +52,9 @@ class TelegramClient:
         client_kwargs = {"timeout": self._timeout}
         if self._transport is not None:
             client_kwargs["transport"] = self._transport
+        elif self._proxy:
+            # httpx 0.25 uses `proxies=` (deprecated in 0.27 in favor of `proxy=`)
+            client_kwargs["proxies"] = self._proxy
 
         for attempt in range(1, self._max_retries + 1):
             try:

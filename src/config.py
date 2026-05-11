@@ -142,6 +142,7 @@ class Settings(BaseSettings):
     TELEGRAM_BOT_TOKEN: str = Field(default="", env="TELEGRAM_BOT_TOKEN")
     TELEGRAM_CHAT_ID: str = Field(default="", env="TELEGRAM_CHAT_ID")
     TELEGRAM_PARSE_MODE: str = Field(default="Markdown", env="TELEGRAM_PARSE_MODE")
+    TELEGRAM_PROXY_URL: str = Field(default="", env="TELEGRAM_PROXY_URL")
     ALERTS_DRY_RUN: bool = Field(default=False, env="ALERTS_DRY_RUN")
     
     class Config:
