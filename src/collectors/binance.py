@@ -202,10 +202,14 @@ class BinanceCollector(ExchangeCollector):
             ws_url = f"{self.ws_base_url}{stream_params}"
             
             logger.info(f"🔌 Creating Binance WebSocket connection {client_key} with {len(streams)} streams")
-            
-            # Create WebSocket connection
-            websocket = await websockets.connect(ws_url)
-            
+
+            # Create WebSocket connection (websockets 13+ supports proxy= kwarg natively)
+            connect_kwargs = {}
+            proxy = settings.BINANCE_PROXY_URL or None
+            if proxy:
+                connect_kwargs["proxy"] = proxy
+            websocket = await websockets.connect(ws_url, **connect_kwargs)
+
             return websocket
             
         except Exception as e:

@@ -18,6 +18,10 @@ RUN conda env create -f environment.yml
 # Make RUN commands use the new environment
 SHELL ["conda", "run", "-n", "freqtrade-data-service", "/bin/bash", "-c"]
 
+# Upgrade websockets to 13+ for native proxy support (BINANCE_PROXY_URL).
+# Done as a separate layer so the heavy conda env layer stays cached.
+RUN pip install --no-cache-dir 'websockets>=13,<15' 'python-socks[asyncio]>=2.4'
+
 # Copy application code
 COPY src/ ./src/
 COPY config/ ./config/
