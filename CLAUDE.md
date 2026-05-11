@@ -110,11 +110,10 @@ Partitioned by month, ordered by (exchange, symbol, timeframe, timestamp).
 ## API Endpoints
 
 ### Main Endpoints
-- `GET /api/v1/health`: Service health status
+- `GET /api/v1/health`: Per-module health probe — body shape: `{status, details: {database, classification, detection, alerts, ws_collectors, recovery, ...}}`. Owned exclusively by `src/main.py`; `src/api/routes.py` MUST NOT register `@router.get("/health")` (see Common Issues #6 below).
 - `GET /api/v1/ohlcv/{exchange}/{symbol}/{timeframe}`: Single timeframe data
 - `GET /api/v1/multi-timeframe/{symbol}`: All timeframes for a symbol
 - `GET /api/v1/status`: Detailed service status
-- `GET /dashboard`: Web UI for monitoring
 
 ### Key Parameters
 - `limit`: Number of candles (default: 1000, max: 5000)
@@ -127,6 +126,23 @@ Partitioned by month, ordered by (exchange, symbol, timeframe, timestamp).
 2. **Data Gaps**: Recovery service runs every minute, check logs for REST API issues
 3. **High Memory Usage**: Adjust symbol counts or TTL settings in config
 4. **ClickHouse Connection**: Ensure Docker container is running and ports are accessible
+5. **Binance Futures WS silently broken (handshake OK, 0 frames forever)**:
+   合约 WS URL **必须带 `/market/` 路由前缀**：用 `wss://fstream.binance.com/market/ws/...`，
+   不要用 `wss://fstream.binance.com/ws/...`。后者 server 接受连接 + 接受 subscribe 但
+   **永远不推任何数据**（既不报错也不断开，看起来一切正常但 ClickHouse 0 条 websocket 数据）。
+   现货 endpoint (`stream.binance.com`) 没有这个要求，所以现货 WS 永远工作。
+   坑位定义在 `src/collectors/binance.py:29` (`self.ws_base_url`)。
+   验证方法：`SELECT data_quality, count() FROM ohlcv_futures WHERE timestamp >= now() - INTERVAL 5 MINUTE GROUP BY data_quality`，
+   应该看到 `websocket` 行而非只有 `rest_api`。
+
+6. **`/api/v1/health` 只返回 `{status, timestamp}` 而不含 sub-probe**：
+   FastAPI 注册顺序"先注册者优先" —— `app.include_router(routes.router, prefix="/api/v1")` 在
+   `src/main.py` 早于 `@app.get("/api/v1/health")` 装饰器，所以如果 `src/api/routes.py` 里也声明
+   `@router.get("/health")`，它会**静默覆盖** main.py 的 sub-probe 版本，导致 health body 退化为
+   只有 `{status, timestamp}`、无任何模块状态。**唯一正确做法**：`/api/v1/health` 由 `src/main.py`
+   独占，`src/api/routes.py` 禁止注册同路径。这条规则已写进 baseline-infrastructure spec
+   "Module Wiring Convention"。验证方法：`curl -s host:port/api/v1/health | jq 'keys'`，
+   应该看到 `["details","status"]`，且 `details` 含 `ws_collectors` / `recovery` 等模块 sub-key。
 
 ### Log Locations
 - Application logs: `logs/data_service.log` (rotated daily)

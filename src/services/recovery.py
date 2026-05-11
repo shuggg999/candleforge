@@ -20,6 +20,8 @@ class RecoveryService:
         self.is_running = False
         self.check_interval = settings.RECOVERY_CHECK_INTERVAL
         self.max_gap_minutes = settings.MAX_GAP_MINUTES
+        # Last cycle completion timestamp — surfaced via /api/v1/health to detect stuck recovery loops
+        self.last_cycle_ts: Optional[datetime] = None
         
     def set_collector_manager(self, collector_manager: CollectorManager):
         """Set collector manager reference"""
@@ -37,6 +39,7 @@ class RecoveryService:
         while self.is_running:
             try:
                 await self._check_and_recover_gaps()
+                self.last_cycle_ts = datetime.now(timezone.utc)
                 await asyncio.sleep(self.check_interval)
             except asyncio.CancelledError:
                 break

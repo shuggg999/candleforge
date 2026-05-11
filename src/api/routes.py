@@ -355,37 +355,12 @@ async def cleanup_data(
         raise HTTPException(status_code=500, detail=f"Failed to cleanup data: {str(e)}")
 
 
-@router.get("/health")
-async def health_check(
-    db: ClickHouseManager = Depends(get_db_manager)
-):
-    """Simple health check endpoint"""
-    try:
-        db_health = await db.health_check()
-        
-        if db_health == "healthy":
-            return {"status": "healthy", "timestamp": datetime.now(timezone.utc)}
-        else:
-            raise HTTPException(
-                status_code=503,
-                detail={
-                    "status": "unhealthy",
-                    "database": db_health,
-                    "timestamp": datetime.now(timezone.utc)
-                }
-            )
-            
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(
-            status_code=503,
-            detail={
-                "status": "error",
-                "error": str(e),
-                "timestamp": datetime.now(timezone.utc)
-            }
-        )
+# NOTE: The `/health` endpoint is owned exclusively by `src/main.py` and exposes
+# per-module sub-probes (database, classification, detection, alerts, ws_collectors,
+# recovery). Do NOT re-register `@router.get("/health")` here — FastAPI keeps the
+# first registered handler and silently overrides later ones, which is how the
+# 2026-05-12 sub-probe regression was introduced. See `openspec/changes/
+# fix-ttl-and-health-probe/` and CLAUDE.md "Common Issues #6".
 
 # 🗂️ Log Management Endpoints
 @router.get("/admin/logs/stats")

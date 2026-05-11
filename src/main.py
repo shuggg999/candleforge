@@ -5,6 +5,7 @@ import asyncio
 import signal
 import sys
 from contextlib import asynccontextmanager
+from datetime import datetime, timezone
 from typing import Dict, Any, Optional
 
 from fastapi import FastAPI, HTTPException
@@ -421,72 +422,191 @@ async def dashboard():
         )
 
 
+def _safe_subprobe(name: str, fn):
+    """Run a sub-probe callable, returning a failed-shape dict instead of raising.
+
+    Sub-probe functions sometimes touch live state (DB connections, collector
+    internals); we don't want any one of them taking the whole /health endpoint
+    down with a 500. Wrap each call and surface the error inline so operators
+    can see which subsystem misbehaved.
+    """
+    try:
+        return fn()
+    except Exception as exc:  # noqa: BLE001 — sub-probes are arbitrary code
+        logger.warning("Health sub-probe {!r} raised: {}", name, exc)
+        return {"status": "failed", "reason": str(exc)}
+
+
+def _compute_ws_collectors_health(collector_manager) -> Dict[str, Any]:
+    """Aggregate WS-client state across all collectors into a single sub-probe dict.
+
+    A client_key counts as "expected" if it appears in either `websocket_clients`
+    (currently open) or `connection_health` (was opened at least once). It counts
+    as "connected" only if it's currently in `websocket_clients`. The difference
+    is what landed in `disconnected_client_keys`.
+    """
+    if collector_manager is None:
+        return {
+            "status": "failed",
+            "reason": "collector_manager not initialized",
+            "expected_count": 0,
+            "connected_count": 0,
+            "disconnected_client_keys": [],
+        }
+
+    expected_keys: set = set()
+    connected_keys: set = set()
+    for collector_id, collector in getattr(collector_manager, "collectors", {}).items():
+        ws_clients = getattr(collector, "websocket_clients", {}) or {}
+        conn_health = getattr(collector, "connection_health", {}) or {}
+        for k in set(ws_clients.keys()) | set(conn_health.keys()):
+            scoped = f"{collector_id}:{k}"
+            expected_keys.add(scoped)
+            if k in ws_clients:
+                connected_keys.add(scoped)
+
+    disconnected = sorted(expected_keys - connected_keys)
+    expected_count = len(expected_keys)
+    connected_count = len(connected_keys)
+
+    if expected_count == 0:
+        status = "failed"
+    elif connected_count < expected_count:
+        status = "degraded"
+    else:
+        status = "ok"
+
+    return {
+        "status": status,
+        "expected_count": expected_count,
+        "connected_count": connected_count,
+        "disconnected_client_keys": disconnected,
+    }
+
+
+def _compute_recovery_health(recovery_service) -> Dict[str, Any]:
+    """Expose recovery loop liveness as a sub-probe dict.
+
+    `last_cycle_age_seconds` is None when the loop has never completed a cycle
+    (either freshly started or currently disabled). Operators reading /health
+    can distinguish "disabled" (is_running=False) from "stuck" (is_running=True
+    but age > 5min) without consulting logs.
+    """
+    if recovery_service is None:
+        return {
+            "status": "failed",
+            "reason": "recovery_service not initialized",
+            "is_running": False,
+            "last_cycle_age_seconds": None,
+        }
+
+    is_running = bool(getattr(recovery_service, "is_running", False))
+    last_cycle_ts = getattr(recovery_service, "last_cycle_ts", None)
+    if last_cycle_ts is None:
+        age_seconds = None
+    else:
+        age_seconds = (datetime.now(timezone.utc) - last_cycle_ts).total_seconds()
+
+    if not is_running:
+        # Recovery service intentionally disabled in current main.py startup;
+        # treat as degraded (not failed) so operators see the signal but service
+        # stays usable.
+        status = "degraded"
+    elif age_seconds is None or age_seconds > 300:
+        status = "degraded"
+    else:
+        status = "ok"
+
+    return {
+        "status": status,
+        "is_running": is_running,
+        "last_cycle_age_seconds": age_seconds,
+    }
+
+
 @app.get("/api/v1/health")
 async def health_check():
-    """Health check endpoint"""
+    """Per-module health probe — single source of truth for /api/v1/health.
+
+    `src/api/routes.py` MUST NOT register a duplicate `/health` route — FastAPI
+    keeps the first-registered handler and silently overrides this one. See
+    `openspec/specs/baseline-infrastructure/spec.md` (Module Wiring Convention).
+    """
     try:
         status = await service.get_status()
-
-        # Determine overall health
-        if not status["running"]:
-            raise HTTPException(status_code=503, detail="Service not running")
-
-        health_status = "healthy"
-        if status["database"] != "healthy":
-            health_status = "degraded"
-
-        # Classification sub-probe (add-volume-classification)
-        if service.classifier is not None:
-            classification_health = service.classifier.health()
-        else:
-            classification_health = {
-                "status": "failed",
-                "reason": "classifier not initialized",
-            }
-        status["classification"] = classification_health
-        if classification_health["status"] != "ok":
-            health_status = "degraded"
-
-        # Detection sub-probe (add-volume-detection)
-        if service.detector is not None:
-            detection_health = service.detector.health()
-        else:
-            detection_health = {
-                "status": "failed",
-                "reason": "detector not initialized",
-            }
-        status["detection"] = detection_health
-        if detection_health["status"] != "ok":
-            health_status = "degraded"
-
-        # Alerts sub-probe (add-telegram-alerts)
-        if service.notifier is not None:
-            alerts_health = service.notifier.health()
-        else:
-            alerts_health = {
-                "status": "failed",
-                "reason": "notifier not initialized",
-            }
-        status["alerts"] = alerts_health
-        if alerts_health["status"] != "ok":
-            health_status = "degraded"
-
-        return JSONResponse(
-            status_code=200 if health_status == "healthy" else 503,
-            content={
-                "status": health_status,
-                "details": status
-            }
-        )
-    except Exception as e:
-        logger.error(f"Health check failed: {e}")
+    except Exception as exc:  # noqa: BLE001
+        logger.error(f"Health check get_status failed: {exc}")
         return JSONResponse(
             status_code=503,
-            content={
-                "status": "unhealthy",
-                "error": str(e)
-            }
+            content={"status": "unhealthy", "error": str(exc)},
         )
+
+    if not status.get("running"):
+        return JSONResponse(
+            status_code=503,
+            content={"status": "unhealthy", "error": "Service not running", "details": status},
+        )
+
+    health_status = "healthy"
+    if status.get("database") != "healthy":
+        health_status = "degraded"
+
+    # Module sub-probes — each wrapped so one failure doesn't crash /health.
+    classification_health = _safe_subprobe(
+        "classification",
+        lambda: service.classifier.health() if service.classifier is not None else {
+            "status": "failed",
+            "reason": "classifier not initialized",
+        },
+    )
+    status["classification"] = classification_health
+    if classification_health.get("status") != "ok":
+        health_status = "degraded"
+
+    detection_health = _safe_subprobe(
+        "detection",
+        lambda: service.detector.health() if service.detector is not None else {
+            "status": "failed",
+            "reason": "detector not initialized",
+        },
+    )
+    status["detection"] = detection_health
+    if detection_health.get("status") != "ok":
+        health_status = "degraded"
+
+    alerts_health = _safe_subprobe(
+        "alerts",
+        lambda: service.notifier.health() if service.notifier is not None else {
+            "status": "failed",
+            "reason": "notifier not initialized",
+        },
+    )
+    status["alerts"] = alerts_health
+    if alerts_health.get("status") != "ok":
+        health_status = "degraded"
+
+    # WebSocket collectors — aggregate WS-client state across all collectors
+    ws_health = _safe_subprobe(
+        "ws_collectors",
+        lambda: _compute_ws_collectors_health(service.collector_manager),
+    )
+    status["ws_collectors"] = ws_health
+    if ws_health.get("status") != "ok":
+        health_status = "degraded"
+
+    # Recovery loop liveness — replaces the legacy `recovery: "running"|"stopped"` string.
+    recovery_health = _safe_subprobe(
+        "recovery",
+        lambda: _compute_recovery_health(service.recovery_service),
+    )
+    status["recovery"] = recovery_health
+    if recovery_health.get("status") != "ok":
+        health_status = "degraded"
+
+    return JSONResponse(
+        status_code=200 if health_status == "healthy" else 503,
+        content={"status": health_status, "details": status},
+    )
 
 
 def handle_signal(signum, frame):

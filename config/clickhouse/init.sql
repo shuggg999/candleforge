@@ -26,10 +26,11 @@ ENGINE = ReplacingMergeTree()
 PARTITION BY toYYYYMM(timestamp)
 PRIMARY KEY (exchange, symbol, timeframe, timestamp)
 ORDER BY (exchange, symbol, timeframe, timestamp)
-TTL timestamp + INTERVAL 7 DAY WHERE timeframe = '1m',
-    timestamp + INTERVAL 30 DAY WHERE timeframe = '5m',
-    timestamp + INTERVAL 90 DAY WHERE timeframe IN ('15m', '1h'),
-    timestamp + INTERVAL 365 DAY WHERE timeframe = '4h',
+TTL timestamp + INTERVAL 7    DAY WHERE timeframe = '1m',
+    timestamp + INTERVAL 30   DAY WHERE timeframe = '5m',
+    timestamp + INTERVAL 90   DAY WHERE timeframe = '15m',
+    timestamp + INTERVAL 365  DAY WHERE timeframe = '1h',
+    timestamp + INTERVAL 365  DAY WHERE timeframe = '4h',
     timestamp + INTERVAL 1825 DAY WHERE timeframe = '1d'
 SETTINGS index_granularity = 8192;
 
