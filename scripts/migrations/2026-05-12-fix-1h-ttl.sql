@@ -9,7 +9,7 @@
 -- Operation: ALTER TABLE ... MODIFY TTL is a metadata-only change in ClickHouse
 -- (no data rewrite, no lock). Safe to run online while collectors are writing.
 --
--- Usage on jarvis:
+-- Usage:
 --   docker exec -i clickhouse-db clickhouse-client < scripts/migrations/2026-05-12-fix-1h-ttl.sql
 --
 -- Verification after running:

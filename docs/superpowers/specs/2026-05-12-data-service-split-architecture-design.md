@@ -1,7 +1,7 @@
 # 架构重新定位：data-service 转为纯中转数据库 + 业务层拆出
 
 **日期**: 2026-05-12
-**作者**: shuggg + Claude
+**作者**: project maintainer + Claude
 **状态**: Draft — 待用户 review
 
 ---
@@ -145,7 +145,7 @@
 ### 阶段 4：外部新 repo（不在本仓库做）
 - 新建 `volume-monitor` repo（订阅 NATS + SQL + 检测 + alert event）
 - 新建 `telegram-bot` repo（HTTP webhook → Telegram）
-- 部署：jarvis docker compose 加这两个服务
+- 部署：生产 host 的 docker compose 加这两个服务
 - 验证：与 data-service 内部业务模块**双跑对比**几天，证明 monitor 行为一致
 
 ### 阶段 5：data-service 清理

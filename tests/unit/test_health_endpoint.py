@@ -189,7 +189,7 @@ def test_health_returns_200_when_only_degraded():
     `status: "degraded"` means service is up but a sub-probe reports a
     non-critical issue. Without this distinction, docker's `curl -f` healthcheck
     flips the container to unhealthy permanently even when the service is
-    functional — symptom on jarvis 2026-05-12.
+    functional — symptom observed on production host on 2026-05-12.
     """
     now = datetime.now(timezone.utc)
     c1 = MagicMock()

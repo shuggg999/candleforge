@@ -31,7 +31,7 @@ services:
       - "${CLICKHOUSE_HTTP_PORT:-8123}:8123"
       - "${CLICKHOUSE_NATIVE_PORT:-9000}:9000"
     volumes:
-      - ${CLICKHOUSE_DATA_DIR:-/Volumes/FORGE/data/clickhouse}:/var/lib/clickhouse
+      - ${CLICKHOUSE_DATA_DIR:-./data/clickhouse}:/var/lib/clickhouse
       - ./config/clickhouse/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
       - ./config/clickhouse/config.xml:/etc/clickhouse-server/config.d/custom.xml:ro
     environment:
@@ -75,20 +75,7 @@ services:
       - RECOVERY_CHECK_INTERVAL=${RECOVERY_CHECK_INTERVAL:-60}
       - MAX_GAP_MINUTES=${MAX_GAP_MINUTES:-720}
       - TZ=${TZ:-Asia/Shanghai}
-      # add-volume-classification / detection / alerts (forwarded from .env)
-      - CLASSIFICATION_REFRESH_HOURS=${CLASSIFICATION_REFRESH_HOURS:-12}
-      - DETECTION_INTERVAL_MINUTES=${DETECTION_INTERVAL_MINUTES:-5}
-      - DETECTION_THRESHOLDS=${DETECTION_THRESHOLDS:-}
-      - DETECTION_BASELINE_HOURS=${DETECTION_BASELINE_HOURS:-24}
-      - DETECTION_CURRENT_MINUTES=${DETECTION_CURRENT_MINUTES:-5}
-      - DETECTION_MIN_SAMPLES=${DETECTION_MIN_SAMPLES:-1200}
-      - BACKFILL_BATCH_RPS=${BACKFILL_BATCH_RPS:-10.0}
       - BINANCE_PROXY_URL=${BINANCE_PROXY_URL:-}
-      - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN:-}
-      - TELEGRAM_CHAT_ID=${TELEGRAM_CHAT_ID:-}
-      - TELEGRAM_PARSE_MODE=${TELEGRAM_PARSE_MODE:-Markdown}
-      - TELEGRAM_PROXY_URL=${TELEGRAM_PROXY_URL:-}
-      - ALERTS_DRY_RUN=${ALERTS_DRY_RUN:-false}
     volumes:
       - ./config:/app/config
       - ./logs:/app/logs

@@ -24,7 +24,7 @@ The project SHALL ship a `docker-compose.yml` at repo root that defines exactly 
 
 ### Requirement: Parameterized ClickHouse Persistence Path
 
-The ClickHouse data volume mount path SHALL be parameterized via the `CLICKHOUSE_DATA_DIR` environment variable, defaulting to `/Volumes/FORGE/data/clickhouse` on macOS dev machines and overridable on Linux production hosts (e.g. Bulgarian VPS) without editing `docker-compose.yml`.
+The ClickHouse data volume mount path SHALL be parameterized via the `CLICKHOUSE_DATA_DIR` environment variable, defaulting to `./data/clickhouse` (relative to the repo root) and overridable to an absolute path on production hosts without editing `docker-compose.yml`.
 
 #### Scenario: Override path on production host
 
@@ -34,7 +34,7 @@ The ClickHouse data volume mount path SHALL be parameterized via the `CLICKHOUSE
 #### Scenario: Default path on local dev
 
 - **WHEN** the developer leaves `CLICKHOUSE_DATA_DIR` unset
-- **THEN** the compose file binds to `/Volumes/FORGE/data/clickhouse`
+- **THEN** the compose file binds to `./data/clickhouse` relative to the repo root
 
 ### Requirement: Required Environment Variables
 
@@ -48,7 +48,7 @@ The project SHALL declare a `.env.example` file enumerating every environment va
 #### Scenario: NATS keys documented
 
 - **WHEN** an operator searches `.env.example` for `NATS`
-- **THEN** the file shows `NATS_URL` (default `nats://nats:4222` for in-cluster, override for jarvis hostnames) and `NATS_ENABLE` (default `true`, set to `false` to no-op the publisher)
+- **THEN** the file shows `NATS_URL` (default `nats://nats:4222` for in-cluster service-name resolution, override for external host:port) and `NATS_ENABLE` (default `true`, set to `false` to no-op the publisher)
 
 #### Scenario: No business module config leakage
 
@@ -163,6 +163,6 @@ Code that has been replaced by a current implementation but kept for reference S
 
 #### Scenario: 已部署集群应用 TTL 修复
 
-- **WHEN** 一个 change 修改 init.sql TTL 后部署到 jarvis 上
+- **WHEN** 一个 change 修改 init.sql TTL 后部署到生产环境
 - **THEN** `scripts/migrations/<YYYY-MM-DD>-<change-id>.sql` 包含等价的 `ALTER TABLE ... MODIFY TTL` 语句，运维只需 `clickhouse-client < scripts/migrations/<file>.sql` 即可同步生产表 TTL，无需 drop / recreate / 数据丢失
 

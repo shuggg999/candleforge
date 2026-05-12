@@ -1,161 +1,216 @@
-# 📊 Freqtrade Data Service
+# freqtrade-data-service
 
-> 独立的加密货币合约数据服务，专为Freqtrade多级别策略提供高质量K线数据
+> Pure data relay for cryptocurrency perpetual-futures K-line data.
+> WebSocket collect → ClickHouse persist → NATS publish.
 
-## 🎯 项目简介
+[![License: AGPL v3](https://img.shields.io/badge/License-AGPL_v3-blue.svg)](https://www.gnu.org/licenses/agpl-3.0)
 
-本项目是一个专门为解决Freqtrade策略在获取大量K线数据时遇到的API限制问题而设计的独立数据服务。通过WebSocket实时采集和ClickHouse高性能存储，为策略提供稳定、快速的数据访问。
+## What this is
 
-### 核心特性
-- 🚀 **WebSocket实时采集** - 零API权重消耗，支持475个USDT永续合约
-- 📈 **合约交易特化** - 专注USDT永续合约，支持持仓量、资金费率等数据
-- 🔄 **多级别联动查询** - 一次请求获取多个时间框架，优化策略性能
-- 💾 **智能存储管理** - 自动TTL清理，可扩展至1.8TB外部存储
-- 🛡️ **数据可靠性** - 自动检测补充缺失数据，零重复数据保证
-- 🔄 **企业级监控** - 自动故障恢复、日志轮转、健康监控
-- 🐳 **Docker一键部署** - 简化运维，开箱即用
+This service is the **data plane** of a small distributed trading-data platform. It does exactly three things:
 
-### 支持交易所
-- Binance (主要)
-- OKX
-- Bybit
+1. **Subscribe** to exchange WebSocket streams (Binance USDT-perpetual contracts, ~475 symbols × 6 timeframes)
+2. **Persist** every K-line to a partitioned ClickHouse table (`ohlcv_futures`)
+3. **Publish** each successful insert to NATS JetStream as a typed event
 
-### 系统要求
-- Docker & Docker Compose
-- 8GB+ 内存
-- 10GB+ 磁盘空间
-- 稳定网络连接
+It deliberately holds **no business logic** — no detection, no alerting, no thresholding. Downstream services subscribe to the event bus to do their own work. See the [Sibling Services](#sibling-services) section.
 
-## 🚀 快速开始
+## Architecture
 
-### 1. 克隆项目
+```
+        ┌─────────────────────────────────────┐
+        │     Exchange WebSocket Streams      │
+        │   (Binance fstream, OKX, Bybit)     │
+        └────────────────┬────────────────────┘
+                         │
+                         ▼
+        ┌─────────────────────────────────────┐
+        │     freqtrade-data-service          │  ← this repo
+        │   ┌──────────────────────────────┐  │
+        │   │  WS collector (asyncio)      │  │
+        │   │  REST recovery (gap fill)    │  │
+        │   │  Health endpoint /api/v1/*   │  │
+        │   └──────────────────────────────┘  │
+        └──────┬─────────────────────────┬────┘
+               │ insert                  │ publish
+               ▼                         ▼
+        ┌───────────────┐         ┌─────────────┐
+        │   ClickHouse  │         │     NATS    │
+        │ ohlcv_futures │         │  JetStream  │
+        │  (per-tf TTL) │         │   OHLCV     │
+        └───────────────┘         └─────────────┘
+                                         │
+                                         │ subject: ohlcv.{exchange}.{symbol}.{tf}
+                                         ▼
+                         ┌─────────────────────────────────┐
+                         │       downstream consumers      │
+                         │  (see Sibling Services below)   │
+                         └─────────────────────────────────┘
+```
+
+## Sibling Services
+
+These run as separate processes, subscribe to the same NATS bus, and own all business logic. Pick the ones you need or build your own.
+
+| Service | Role |
+|---|---|
+| [volume-monitor](https://github.com/your-org/volume-monitor) | Symbol-tier classification + 5-minute volume anomaly detection, publishes alert webhooks |
+| [telegram-bot](https://github.com/your-org/telegram-bot) | HTTP `POST /alerts` receiver + Telegram delivery + per-chat rate limiting + audit log |
+
+## Quick Start
+
+### Prerequisites
+- Docker & Docker Compose v2
+- ~10 GB free disk for ClickHouse + NATS volumes
+- For exchanges blocked from your network: a SOCKS5 proxy
+
+### Run
+
 ```bash
-git clone https://github.com/your-username/freqtrade-data-service.git
+git clone https://github.com/your-org/freqtrade-data-service.git
 cd freqtrade-data-service
-```
-
-### 2. 配置环境
-```bash
 cp .env.example .env
-# 编辑.env文件，配置必要的参数
+# edit .env if you need to override CLICKHOUSE_DATA_DIR or set BINANCE_PROXY_URL
+docker compose up -d
 ```
 
-### 3. 启动服务
-```bash
-docker-compose up -d
-```
+Three containers come up: `clickhouse-db`, `nats`, `data-service`.
 
-### 4. 验证服务
-```bash
-# 健康检查
-curl http://localhost:8000/api/v1/health
-
-# 获取数据
-curl http://localhost:8000/api/v1/ohlcv/binance/BTCUSDT/5m?limit=100
-```
-
-## 📚 文档
-
-- [项目开发计划](PROJECT_PLAN.md) - 详细的技术方案和开发指南
-- [API文档](docs/API.md) - 接口说明和使用示例
-- [部署指南](docs/DEPLOYMENT.md) - 生产环境部署说明
-
-## 🏗️ 架构概览
-
-```
-Freqtrade Strategy → FastAPI Service → ClickHouse Database
-                           ↑
-                    WebSocket Collectors
-                           ↑
-                    Exchange APIs (Binance/OKX/Bybit)
-```
-
-## 📊 API示例
-
-### 获取K线数据
-```python
-import requests
-
-# 单一时间框架
-response = requests.get(
-    "http://localhost:8000/api/v1/ohlcv/binance/BTCUSDT/5m",
-    params={"limit": 1000}
-)
-data = response.json()
-
-# 多级别查询（策略优化）
-response = requests.get(
-    "http://localhost:8000/api/v1/multi-timeframe/BTCUSDT"
-)
-all_timeframes = response.json()
-```
-
-## 🔧 配置说明
-
-主要配置项在 `.env` 文件中：
+### Verify
 
 ```bash
-# 数据库配置
-CLICKHOUSE_HOST=localhost
-CLICKHOUSE_PORT=9000
+# Container health
+docker compose ps
 
-# 服务配置
-API_PORT=8000
-LOG_LEVEL=INFO
+# Service health (status + per-module sub-probes)
+curl -s http://localhost:8000/api/v1/health | jq
 
-# 数据保留策略（天）
-TTL_1M=7
-TTL_5M=30
-TTL_15M=90
-TTL_1H=365
+# Latest 100 candles
+curl -s 'http://localhost:8000/api/v1/ohlcv/binance/BTC%2FUSDT/5m?limit=100' | jq '.data | length'
+
+# Multi-timeframe in one shot
+curl -s 'http://localhost:8000/api/v1/multi-timeframe/BTC%2FUSDT' | jq 'keys'
 ```
 
-## 📈 性能指标
+The `/health` body has the shape `{status, details: {database, ws_collectors, recovery, nats}}` — anything failing returns HTTP 503 so Docker's healthcheck flips the container to `unhealthy`.
 
-- **数据延迟**: <100ms (WebSocket实时采集)
-- **查询响应**: 21ms (ClickHouse平均批处理时间)
-- **处理能力**: 1,969条记录/秒
-- **并发支持**: 475个合约 × 5个WebSocket连接
-- **存储空间**: 支持1.8TB外部存储扩展
-- **系统稳定性**: 企业级自动恢复，零错误运行
+## API Surface
 
-## 🔧 新增监控功能
+All under `/api/v1/*`.
 
-### 日志管理API
+| Endpoint | Purpose |
+|---|---|
+| `GET /health` | Per-module health (ClickHouse, WS collectors, recovery loop, NATS publisher) |
+| `GET /status` | Detailed service status |
+| `GET /ohlcv/{exchange}/{symbol}/{timeframe}` | Single timeframe history |
+| `GET /multi-timeframe/{symbol}` | All timeframes for a symbol in one call |
+
+Symbols use slash-form (`BTC/USDT`); URL-encode the slash (`BTC%2FUSDT`). Timeframes: `1m`, `5m`, `15m`, `1h`, `4h`, `1d`.
+
+## Event Bus Schema
+
+Every successful ClickHouse insert publishes one JSON message to NATS JetStream stream `OHLCV`:
+
+- **Subject**: `ohlcv.{exchange}.{symbol_normalized}.{timeframe}` — e.g. `ohlcv.binance.BTCUSDT.5m`
+- **Stream retention**: 24h, max 1 GiB
+- **Payload**: `{schema_version, exchange, symbol, symbol_normalized, timeframe, timestamp, open, high, low, close, volume, turnover, trades_count, data_quality, is_closed, ingested_at}` — numeric fields as decimal strings to preserve precision
+
+Full spec: `openspec/specs/nats-event-bus/spec.md`.
+
+Subscribe with `nats sub` to sanity-check:
+
 ```bash
-# 获取日志统计
-curl http://localhost:8000/api/v1/admin/logs/stats
-
-# 手动触发日志轮转
-curl -X POST http://localhost:8000/api/v1/admin/logs/rotate
+docker run --rm --network freqtrade-data-service_default natsio/nats-box \
+  nats -s nats://nats:4222 sub 'ohlcv.binance.BTCUSDT.>'
 ```
 
-### 自动恢复监控API
+## Configuration
+
+All runtime knobs live in `.env`. See `.env.example` for the complete list with comments. Highlights:
+
+| Variable | Default | Notes |
+|---|---|---|
+| `CLICKHOUSE_DATA_DIR` | `./data/clickhouse` | Host path for ClickHouse volume — override for production |
+| `ENABLED_EXCHANGES` | `binance` | Comma-separated; only `binance` is fully wired |
+| `SYMBOLS` | `ALL` | `ALL` = every USDT-perpetual, or e.g. `BTC/USDT,ETH/USDT` |
+| `TIMEFRAMES` | `1m,5m,15m,1h,4h,1d` | What to subscribe |
+| `TTL_1M` ... `TTL_1D` | per-timeframe (days) | ClickHouse partition TTL |
+| `BINANCE_PROXY_URL` | (empty) | e.g. `socks5h://host.docker.internal:10808` |
+| `NATS_URL` | `nats://nats:4222` | Override for out-of-cluster subscribers |
+| `NATS_ENABLE` | `true` | `false` makes the publisher a no-op |
+
+**This repo does NOT contain Telegram, alert, detection, or classification configuration.** Those live in the sibling-service repos (`volume-monitor/.env.example`, `telegram-bot/.env.example`).
+
+## Project Structure
+
+```
+src/
+├── main.py                 FastAPI app, lifespan, /health
+├── config.py               pydantic-settings
+├── collectors/             exchange-specific WS clients
+│   ├── base.py
+│   ├── binance.py
+│   └── manager.py
+├── storage/
+│   └── clickhouse.py       async writes + publish hook
+├── events/
+│   ├── nats_publisher.py   JetStream publisher
+│   └── event_schema.py     payload contract
+├── services/
+│   └── recovery.py         REST gap-fill (currently dormant)
+├── api/
+│   ├── routes.py           OHLCV queries
+│   └── freqtrade.py        Freqtrade-compatible adapter
+└── utils/
+
+tests/
+├── unit/                   tests for events, storage, health endpoint, init SQL
+└── integration/
+
+openspec/
+├── specs/                  current capabilities: baseline-infrastructure, nats-event-bus
+└── changes/archive/        every change ever made, in order
+```
+
+## Known Gotchas
+
+1. **Binance futures WebSocket needs `/market/` in the URL.** `wss://fstream.binance.com/market/ws/...`, not `wss://fstream.binance.com/ws/...`. The latter accepts the handshake and subscribe frame but never pushes any data. Fixed at `src/collectors/binance.py`. Verify with `SELECT data_quality, count() FROM ohlcv_futures WHERE timestamp >= now() - INTERVAL 5 MINUTE GROUP BY data_quality` — you should see `websocket` rows.
+
+2. **`/api/v1/health` route uniqueness.** FastAPI keeps the first-registered handler. `src/api/routes.py` MUST NOT register `@router.get("/health")` or it silently overrides the rich version in `main.py` and the body degrades to `{status, timestamp}` with no sub-probes.
+
+3. **TTL per-timeframe.** `config/clickhouse/init.sql` uses one `WHERE timeframe = '<tf>'` clause per timeframe, never an `IN (...)` collapse — otherwise changing one TTL silently changes all of them.
+
+## Development
+
 ```bash
-# 查看系统健康状态
-curl http://localhost:8000/api/v1/admin/system/health
+# Conda env
+conda env create -f environment.yml
+conda activate freqtrade-data-service
 
-# 查看自动恢复状态
-curl http://localhost:8000/api/v1/admin/recovery/status
+# Or pip
+pip install -r requirements.txt
 
-# 强制恢复特定组件
-curl -X POST http://localhost:8000/api/v1/admin/recovery/force/clickhouse_db
+# Tests
+pytest tests/ -q
+
+# Code format
+black src/
 ```
 
-## 🤝 贡献
+## Spec-Driven Workflow
 
-欢迎提交Issue和Pull Request！
+This repo uses [OpenSpec](https://github.com/Fission-AI/OpenSpec) to track capability changes. Every non-trivial change starts as `openspec/changes/<change-id>/` with `proposal.md`, `tasks.md`, and a per-capability spec delta, then gets archived after implementation.
 
-## 📝 许可证
+## License
 
-MIT License
+[AGPL v3](LICENSE). If you run a modified version as a network service, you must publish your source. This is intentional: the architecture is meant to be a shared substrate, not a freebie for closed-source commercial monitoring services.
 
-## 🙏 致谢
+## Acknowledgements
 
-- [Freqtrade](https://www.freqtrade.io/) - 优秀的开源交易框架
-- [CCXT](https://github.com/ccxt/ccxt) - 统一的交易所接口
-- [ClickHouse](https://clickhouse.com/) - 高性能时序数据库
+- [Freqtrade](https://www.freqtrade.io/) — the original API shape this service mirrors
+- [ClickHouse](https://clickhouse.com/) — the persistence layer
+- [NATS](https://nats.io/) — the event bus
 
 ---
 
-**注意**: 本项目仅供学习研究使用，不构成投资建议。加密货币交易具有高风险，请谨慎操作。
+**Disclaimer**: Educational and research use only. This service collects market data and exposes a read-only API — it does NOT place orders or hold funds. Cryptocurrency trading is high-risk; use what you build with this data at your own discretion.
