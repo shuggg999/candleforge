@@ -54,8 +54,8 @@ These run as separate processes, subscribe to the same NATS bus, and own all bus
 
 | Service | Role |
 |---|---|
-| [volume-monitor](https://github.com/your-org/volume-monitor) | Symbol-tier classification + 5-minute volume anomaly detection, publishes alert webhooks |
-| [telegram-bot](https://github.com/your-org/telegram-bot) | HTTP `POST /alerts` receiver + Telegram delivery + per-chat rate limiting + audit log |
+| [volume-monitor](https://github.com/shuggg999/volume-monitor) | Symbol-tier classification + 5-minute volume anomaly detection, publishes alert webhooks |
+| [telegram-bot](https://github.com/shuggg999/telegram-bot) | HTTP `POST /alerts` receiver + Telegram delivery + per-chat rate limiting + audit log |
 
 ## Quick Start
 
@@ -67,7 +67,7 @@ These run as separate processes, subscribe to the same NATS bus, and own all bus
 ### Run
 
 ```bash
-git clone https://github.com/your-org/freqtrade-data-service.git
+git clone https://github.com/shuggg999/freqtrade-data-service.git
 cd freqtrade-data-service
 cp .env.example .env
 # edit .env if you need to override CLICKHOUSE_DATA_DIR or set BINANCE_PROXY_URL

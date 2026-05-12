@@ -97,3 +97,6 @@ config/clickhouse/init_freqtrade.sql
 # host-specific docker-compose overrides (e.g. production vs local port mappings)
 docker-compose.override.yml
 docker-compose.override.*.yml
+
+# Pine Script strategies — kept private, not part of the open-source release
+pine-strategies/
