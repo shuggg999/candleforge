@@ -1,16 +1,17 @@
 """Tests for /api/v1/health endpoint sub-probes.
 
-Spec (baseline-infrastructure / Module Wiring Convention):
+Spec (baseline-infrastructure / Module Wiring Convention, post cleanup-business-modules):
 - /api/v1/health MUST be the single endpoint defined in src/main.py.
 - src/api/routes.py MUST NOT register a duplicate /health route.
 - body.details MUST include sub-probe keys for every wired module:
-  database, classification, detection, alerts, ws_collectors, recovery.
+  database, ws_collectors, recovery, nats.
 - Sub-probe failure MUST yield 503 (not 500) and surface the failing sub-key's
   status, while keeping the JSON body intact.
+- After cleanup-business-modules: classification/detection/alerts sub-probes
+  MUST NOT appear (those moved to volume-monitor and telegram-bot repos).
 """
 from __future__ import annotations
 
-import importlib
 from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict
@@ -33,7 +34,6 @@ def patched_service(**overrides: Any):
     mock_service = MagicMock()
     mock_service.is_running = overrides.get("is_running", True)
 
-    # get_status — base dict the health_check function starts from
     base_status: Dict[str, Any] = {
         "running": mock_service.is_running,
         "database": overrides.get("database", "healthy"),
@@ -42,31 +42,6 @@ def patched_service(**overrides: Any):
     }
     mock_service.get_status = AsyncMock(return_value=base_status)
 
-    # Classification sub-probe component
-    if "classifier" in overrides:
-        mock_service.classifier = overrides["classifier"]
-    else:
-        mock_classifier = MagicMock()
-        mock_classifier.health.return_value = {"status": "ok", "symbol_count": 100}
-        mock_service.classifier = mock_classifier
-
-    # Detection sub-probe component
-    if "detector" in overrides:
-        mock_service.detector = overrides["detector"]
-    else:
-        mock_detector = MagicMock()
-        mock_detector.health.return_value = {"status": "ok", "last_run_ts": None}
-        mock_service.detector = mock_detector
-
-    # Alerts sub-probe component
-    if "notifier" in overrides:
-        mock_service.notifier = overrides["notifier"]
-    else:
-        mock_notifier = MagicMock()
-        mock_notifier.health.return_value = {"status": "ok", "dry_run": False}
-        mock_service.notifier = mock_notifier
-
-    # collector_manager — for ws_collectors sub-probe
     if "collector_manager" in overrides:
         mock_service.collector_manager = overrides["collector_manager"]
     else:
@@ -85,7 +60,6 @@ def patched_service(**overrides: Any):
         mock_cm.collectors = {"binance_primary": c1}
         mock_service.collector_manager = mock_cm
 
-    # recovery_service — for recovery sub-probe
     if "recovery_service" in overrides:
         mock_service.recovery_service = overrides["recovery_service"]
     else:
@@ -94,8 +68,21 @@ def patched_service(**overrides: Any):
         mock_rs.last_cycle_ts = datetime.now(timezone.utc)
         mock_service.recovery_service = mock_rs
 
-    # db_manager — keep simple
     mock_service.db_manager = MagicMock()
+
+    # NATS publisher — default healthy
+    if "publisher" in overrides:
+        mock_service.publisher = overrides["publisher"]
+    else:
+        mock_pub = MagicMock()
+        mock_pub.health.return_value = {
+            "status": "ok",
+            "connected": True,
+            "publish_failure_count": 0,
+            "last_publish_age_seconds": 1.0,
+            "disabled": False,
+        }
+        mock_service.publisher = mock_pub
 
     orig = main_module.service
     main_module.service = mock_service
@@ -103,9 +90,6 @@ def patched_service(**overrides: Any):
         yield main_module.app, mock_service
     finally:
         main_module.service = orig
-
-
-# --- 2.1 ----------------------------------------------------------------------
 
 
 def test_health_returns_module_subprobes():
@@ -121,7 +105,7 @@ def test_health_returns_module_subprobes():
         f"Likely routes.py's simplified /health is overriding main.py's full version."
     )
     details = body["details"]
-    required = {"database", "classification", "detection", "alerts", "ws_collectors", "recovery"}
+    required = {"database", "ws_collectors", "recovery", "nats"}
     missing = required - set(details.keys())
     assert not missing, (
         f"health details missing sub-probes: {sorted(missing)}. "
@@ -129,47 +113,25 @@ def test_health_returns_module_subprobes():
     )
 
 
-# --- 2.2 ----------------------------------------------------------------------
-
-
-def test_health_503_when_classification_failed():
-    """Spec: sub-probe failure SHALL surface as 503 with status field reflecting failure."""
-    failing_classifier = MagicMock()
-    failing_classifier.health.return_value = {
-        "status": "failed",
-        "reason": "ClickHouse query timed out",
-    }
-    with patched_service(classifier=failing_classifier) as (app, _):
+def test_health_no_business_module_subprobes():
+    """Spec (cleanup-business-modules): classification/detection/alerts MUST NOT
+    appear in body.details — they live in volume-monitor and telegram-bot now."""
+    with patched_service() as (app, _svc):
         client = TestClient(app)
         r = client.get("/api/v1/health")
 
-    assert r.status_code == 503, (
-        f"expected 503 when classification sub-probe failed, got {r.status_code}: {r.text}"
-    )
     body = r.json()
-    # overall status should reflect degraded/unhealthy
-    assert body.get("status") in ("degraded", "unhealthy"), (
-        f"expected status=degraded|unhealthy, got {body.get('status')!r}"
+    details = body.get("details", {})
+    leaked = set(details.keys()) & {"classification", "detection", "alerts"}
+    assert not leaked, (
+        f"data-service /health MUST NOT expose business module sub-probes after "
+        f"cleanup-business-modules; leaked: {sorted(leaked)}"
     )
-    # the failing sub-probe should be reachable in the body
-    classification = body.get("details", {}).get("classification", {})
-    assert classification.get("status") == "failed", (
-        f"failing sub-probe must be surfaced in body, got {classification}"
-    )
-
-
-# --- 2.3 ----------------------------------------------------------------------
 
 
 def test_health_ws_collectors_subprobe_shape():
     """Spec: ws_collectors sub-probe MUST contain expected_count, connected_count,
-    disconnected_client_keys.
-
-    Models the realistic state where a client was once connected (so it has a
-    `connection_health` entry) but has since been removed from `websocket_clients`
-    (e.g. reconnect failed). The sub-probe treats the union of both dicts as
-    "expected" and `websocket_clients` as "currently connected".
-    """
+    disconnected_client_keys."""
     now = datetime.now(timezone.utc)
     c1 = MagicMock()
     c1.websocket_clients = {
@@ -179,7 +141,6 @@ def test_health_ws_collectors_subprobe_shape():
     c1.connection_health = {
         "BTCUSDT@kline_1m": {"status": "healthy", "last_message_time": now, "messages_count": 100, "symbols": set()},
         "ETHUSDT@kline_1m": {"status": "healthy", "last_message_time": now, "messages_count": 50, "symbols": set()},
-        # Was once connected, now gone — should show up as disconnected
         "BNBUSDT@kline_1m": {"status": "unhealthy", "last_message_time": None, "messages_count": 0, "symbols": set()},
     }
     mock_cm = MagicMock()
@@ -195,22 +156,12 @@ def test_health_ws_collectors_subprobe_shape():
         assert key in ws, (
             f"ws_collectors sub-probe missing key {key!r}; got keys: {sorted(ws.keys())}"
         )
-    assert isinstance(ws["disconnected_client_keys"], list), (
-        f"disconnected_client_keys must be a list, got {type(ws['disconnected_client_keys']).__name__}"
-    )
-    # 3 clients ever seen, 2 currently in websocket_clients dict → 1 missing
-    assert ws["expected_count"] == 3, f"expected_count should be 3 (union of both dicts), got {ws['expected_count']}"
-    assert ws["connected_count"] == 2, f"connected_count should be 2 (websocket_clients), got {ws['connected_count']}"
-    assert len(ws["disconnected_client_keys"]) == 1, (
-        f"disconnected_client_keys should have 1 entry (BNBUSDT), got {ws['disconnected_client_keys']}"
-    )
-    assert "BNBUSDT" in ws["disconnected_client_keys"][0], (
-        f"disconnected entry should reference BNBUSDT, got {ws['disconnected_client_keys']}"
-    )
-    assert ws["status"] == "degraded", f"status should be degraded when connected < expected, got {ws['status']}"
-
-
-# --- 2.4 ----------------------------------------------------------------------
+    assert isinstance(ws["disconnected_client_keys"], list)
+    assert ws["expected_count"] == 3
+    assert ws["connected_count"] == 2
+    assert len(ws["disconnected_client_keys"]) == 1
+    assert "BNBUSDT" in ws["disconnected_client_keys"][0]
+    assert ws["status"] == "degraded"
 
 
 def test_health_recovery_subprobe_shape():
@@ -224,39 +175,22 @@ def test_health_recovery_subprobe_shape():
 
     body = r.json()
     rec = body.get("details", {}).get("recovery", {})
-    # NB: existing main.py returns recovery as a string ("running"/"stopped").
-    # The new spec requires recovery be a dict with sub-keys.
-    assert isinstance(rec, dict), (
-        f"recovery sub-probe must be a dict, got {type(rec).__name__}: {rec!r}. "
-        f"This test fails until main.py:424 health_check is extended."
-    )
+    assert isinstance(rec, dict), f"recovery sub-probe must be a dict, got {type(rec).__name__}"
     for key in ("status", "is_running", "last_cycle_age_seconds"):
-        assert key in rec, (
-            f"recovery sub-probe missing key {key!r}; got keys: {sorted(rec.keys())}"
-        )
+        assert key in rec, f"recovery sub-probe missing key {key!r}; got keys: {sorted(rec.keys())}"
     assert rec["is_running"] is True
-    # last_cycle_age_seconds should be a number close to 42
     age = rec["last_cycle_age_seconds"]
-    assert isinstance(age, (int, float)), (
-        f"last_cycle_age_seconds must be numeric, got {type(age).__name__}"
-    )
-    assert 30 <= age <= 60, f"expected age ~42s, got {age}"
-
-
-# --- additional regression: no duplicate /health route -----------------------
+    assert isinstance(age, (int, float))
+    assert 30 <= age <= 60
 
 
 def test_health_returns_200_when_only_degraded():
     """Spec: HTTP 503 means *unhealthy* (service unusable). HTTP 200 with
     `status: "degraded"` means service is up but a sub-probe reports a
-    non-critical issue (e.g. recovery hasn't completed first cycle yet,
-    one WS client out of many is disconnected).
-
-    Without this distinction, docker's `curl -f` healthcheck flips the
-    container to unhealthy permanently even when the service is functional
-    — which was the symptom on jarvis 2026-05-12.
+    non-critical issue. Without this distinction, docker's `curl -f` healthcheck
+    flips the container to unhealthy permanently even when the service is
+    functional — symptom on jarvis 2026-05-12.
     """
-    # ws_collectors reports "degraded" (one expected client missing)
     now = datetime.now(timezone.utc)
     c1 = MagicMock()
     c1.websocket_clients = {"BTCUSDT@kline_1m": MagicMock()}
@@ -272,14 +206,11 @@ def test_health_returns_200_when_only_degraded():
         r = client.get("/api/v1/health")
 
     body = r.json()
-    assert body["details"]["ws_collectors"]["status"] == "degraded", (
-        f"sanity: ws_collectors should be degraded, got {body['details']['ws_collectors']}"
-    )
+    assert body["details"]["ws_collectors"]["status"] == "degraded"
     assert r.status_code == 200, (
-        f"degraded-only should return HTTP 200 (service usable), got {r.status_code}. "
-        f"This regression breaks docker healthcheck on jarvis."
+        f"degraded-only should return HTTP 200 (service usable), got {r.status_code}."
     )
-    assert body["status"] == "degraded", f"body.status should be 'degraded', got {body['status']!r}"
+    assert body["status"] == "degraded"
 
 
 def test_health_serializes_datetime_in_collectors_status():
@@ -298,7 +229,7 @@ def test_health_serializes_datetime_in_collectors_status():
             "collectors": {
                 "binance_primary": {
                     "is_running": True,
-                    "last_message_time": now,  # <-- raw datetime, must serialize
+                    "last_message_time": now,
                     "stats": {"started_at": now, "messages_received": 1000},
                 },
             },
@@ -310,26 +241,15 @@ def test_health_serializes_datetime_in_collectors_status():
         client = TestClient(app)
         r = client.get("/api/v1/health")
 
-    # Whatever the verdict, the response MUST be valid JSON (not a 500 from
-    # serialization). 200 or 503 — both fine. 500 means we regressed.
-    assert r.status_code != 500, (
-        f"datetime in collectors.last_message_time crashed serialization; "
-        f"body={r.text[:300]}"
-    )
+    assert r.status_code != 500
     body = r.json()
     assert "details" in body
-    # The datetime value should now be an ISO string after jsonable_encoder
     nested = body["details"]["collectors"]["binance_primary"]["last_message_time"]
-    assert isinstance(nested, str) and "T" in nested, (
-        f"datetime should serialize to ISO string, got {nested!r}"
-    )
+    assert isinstance(nested, str) and "T" in nested
 
 
 def test_health_nats_subprobe_shape():
-    """Spec (introduce-nats-event-bus / NATS Sub-Probe on /api/v1/health):
-    body.details MUST include 'nats' key with shape:
-    {status, connected, publish_failure_count, last_publish_age_seconds, disabled}
-    """
+    """Spec (introduce-nats-event-bus): body.details MUST include 'nats' key."""
     mock_pub = MagicMock()
     mock_pub.health.return_value = {
         "status": "ok",
@@ -338,8 +258,7 @@ def test_health_nats_subprobe_shape():
         "last_publish_age_seconds": 1.2,
         "disabled": False,
     }
-    with patched_service() as (app, svc):
-        svc.publisher = mock_pub
+    with patched_service(publisher=mock_pub) as (app, _svc):
         client = TestClient(app)
         r = client.get("/api/v1/health")
 
@@ -353,9 +272,8 @@ def test_health_nats_subprobe_shape():
 
 
 def test_health_nats_subprobe_failed_when_no_publisher():
-    """When service.publisher is None, nats sub-probe reports failed (component not initialized)."""
-    with patched_service() as (app, svc):
-        svc.publisher = None
+    """When service.publisher is None, nats sub-probe reports failed."""
+    with patched_service(publisher=None) as (app, _svc):
         client = TestClient(app)
         r = client.get("/api/v1/health")
 
@@ -366,24 +284,14 @@ def test_health_nats_subprobe_failed_when_no_publisher():
 
 
 def test_only_one_health_route_registered():
-    """Spec (Module Wiring Convention scenario): exactly one handler for /api/v1/health,
-    defined in src/main.py — routes.py MUST NOT register its own /health.
-    """
+    """Spec: exactly one handler for /api/v1/health, defined in src/main.py."""
     import src.main as main_module
 
     health_routes = [
         r for r in main_module.app.routes
         if getattr(r, "path", None) == "/api/v1/health"
     ]
-    assert len(health_routes) == 1, (
-        f"expected exactly 1 /api/v1/health route, got {len(health_routes)}. "
-        f"This usually means src/api/routes.py also registers /health and "
-        f"FastAPI silently overrides main.py's full version."
-    )
-
-    # The single registered handler must come from src.main module (not routes.py)
+    assert len(health_routes) == 1
     endpoint = getattr(health_routes[0], "endpoint", None)
     module_name = getattr(endpoint, "__module__", "")
-    assert module_name == "src.main", (
-        f"/api/v1/health handler must live in src.main, got {module_name!r}"
-    )
+    assert module_name == "src.main"

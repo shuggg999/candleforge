@@ -24,15 +24,6 @@ from src.collectors.manager import CollectorManager
 from src.services.recovery import RecoveryService
 from src.utils.log_manager import log_manager
 from src.utils.recovery_manager import auto_recovery
-from src.classification import Classifier
-from src.classification.classifier import adapt_aiochclient
-from src.classification.api import router as classification_router, set_classifier as set_classification_singleton
-from src.detection import Detector, LoggingPublisher
-from src.detection.api import router as detection_router, set_detector as set_detection_singleton
-from src.detection.thresholds import DEFAULT_THRESHOLDS, merge_thresholds, parse_thresholds_env
-from src.scheduler import build_scheduler
-from src.alerts import Notifier, TelegramClient
-from src.alerts.api import router as alerts_router, set_notifier as set_alerts_singleton
 from src.events import NatsPublisher
 
 
@@ -60,11 +51,7 @@ class DataService:
         self.db_manager: ClickHouseManager = None
         self.collector_manager: CollectorManager = None
         self.recovery_service: RecoveryService = None
-        self.classifier: Optional[Classifier] = None
-        self.detector: Optional[Detector] = None
-        self.notifier: Optional[Notifier] = None
         self.publisher: Optional[NatsPublisher] = None
-        self.scheduler = None
         self.is_running = False
     
     async def startup(self):
@@ -123,77 +110,6 @@ class DataService:
         # Start recovery service - TEMPORARILY DISABLED
         # asyncio.create_task(self.recovery_service.start())
         logger.info("⚠️ Recovery service temporarily disabled")
-        
-        # Volume tier classifier (add-volume-classification)
-        try:
-            self.classifier = Classifier(
-                ch_client=adapt_aiochclient(self.db_manager.client),
-                refresh_hours=settings.CLASSIFICATION_REFRESH_HOURS,
-                exchange="binance",
-            )
-            await self.classifier.refresh_tiers()
-            logger.info("📐 Volume tier classifier initialized")
-        except Exception as e:
-            logger.warning(f"⚠️ Classifier initial refresh failed (non-fatal): {e}")
-        set_classification_singleton(self.classifier)
-
-        # Telegram alerts notifier (add-telegram-alerts) — replaces LoggingPublisher injection
-        try:
-            tg_client = None
-            if settings.TELEGRAM_BOT_TOKEN:
-                tg_client = TelegramClient(
-                    token=settings.TELEGRAM_BOT_TOKEN,
-                    parse_mode=settings.TELEGRAM_PARSE_MODE,
-                    proxy=settings.TELEGRAM_PROXY_URL or None,
-                )
-            self.notifier = Notifier(
-                ch_client=adapt_aiochclient(self.db_manager.client),
-                telegram_client=tg_client,
-                chat_id=settings.TELEGRAM_CHAT_ID or None,
-                dry_run=settings.ALERTS_DRY_RUN,
-                exchange="binance",
-            )
-            set_alerts_singleton(self.notifier)
-            logger.info(
-                "📨 Telegram notifier initialized (dry_run={})",
-                self.notifier._dry_run,
-            )
-        except Exception as e:
-            logger.warning(f"⚠️ Notifier init failed (falling back to LoggingPublisher): {e}")
-            self.notifier = None
-
-        # Volume anomaly detector + scheduler (add-volume-detection)
-        try:
-            overrides = parse_thresholds_env(settings.DETECTION_THRESHOLDS)
-            thresholds = merge_thresholds(DEFAULT_THRESHOLDS, overrides) if overrides else DEFAULT_THRESHOLDS
-            publisher = self.notifier if self.notifier is not None else LoggingPublisher()
-            self.detector = Detector(
-                ch_client=adapt_aiochclient(self.db_manager.client),
-                classifier=self.classifier,
-                publisher=publisher,
-                thresholds=thresholds,
-                baseline_hours=settings.DETECTION_BASELINE_HOURS,
-                current_minutes=settings.DETECTION_CURRENT_MINUTES,
-                min_samples=settings.DETECTION_MIN_SAMPLES,
-                interval_minutes=settings.DETECTION_INTERVAL_MINUTES,
-                exchange="binance",
-            )
-            set_detection_singleton(self.detector)
-            logger.info("📊 Volume anomaly detector initialized")
-
-            # NOTE: cold-start backfill skipped by default (本地 dev 连不到 Binance);
-            # production deploy on Jarvis will set BACKFILL_ON_STARTUP and call ensure_baseline_data.
-
-            self.scheduler = build_scheduler(
-                classifier=self.classifier,
-                detector=self.detector,
-                detection_interval_minutes=settings.DETECTION_INTERVAL_MINUTES,
-                classification_refresh_hours=settings.CLASSIFICATION_REFRESH_HOURS,
-            )
-            self.scheduler.start()
-            logger.info("⏰ Scheduler started (detection cycle + classification refresh)")
-        except Exception as e:
-            logger.warning(f"⚠️ Detection bootstrap failed (non-fatal): {e}")
 
         self.is_running = True
         logger.info("✅ Data Service is ready!")
@@ -308,22 +224,6 @@ class DataService:
         logger.info("🛑 Shutting down Data Service...")
         self.is_running = False
 
-        # Detection scheduler (add-volume-detection)
-        if self.scheduler:
-            try:
-                self.scheduler.shutdown(wait=True)
-            except Exception as e:
-                logger.warning(f"Scheduler shutdown error: {e}")
-        set_detection_singleton(None)
-        set_alerts_singleton(None)
-
-        # Volume tier classifier
-        if self.classifier:
-            try:
-                await self.classifier.shutdown()
-            except Exception as e:
-                logger.warning(f"Classifier shutdown error: {e}")
-
         # 🔄 Stop auto recovery monitoring
         await auto_recovery.stop_monitoring()
         
@@ -410,15 +310,6 @@ app.include_router(routes.router, prefix="/api/v1")
 # Include Freqtrade-compatible API routes
 from src.api.freqtrade import router as freqtrade_router
 app.include_router(freqtrade_router, prefix="/api/v1")
-
-# Include volume classification routes (prefix is set inside the router)
-app.include_router(classification_router)
-
-# Include volume detection routes
-app.include_router(detection_router)
-
-# Include telegram alerts routes
-app.include_router(alerts_router)
 
 
 @app.get("/")
@@ -595,36 +486,6 @@ async def health_check():
         _absorb("degraded")
 
     # Module sub-probes — each wrapped so one failure doesn't crash /health.
-    classification_health = _safe_subprobe(
-        "classification",
-        lambda: service.classifier.health() if service.classifier is not None else {
-            "status": "failed",
-            "reason": "classifier not initialized",
-        },
-    )
-    status["classification"] = classification_health
-    _absorb(classification_health.get("status"))
-
-    detection_health = _safe_subprobe(
-        "detection",
-        lambda: service.detector.health() if service.detector is not None else {
-            "status": "failed",
-            "reason": "detector not initialized",
-        },
-    )
-    status["detection"] = detection_health
-    _absorb(detection_health.get("status"))
-
-    alerts_health = _safe_subprobe(
-        "alerts",
-        lambda: service.notifier.health() if service.notifier is not None else {
-            "status": "failed",
-            "reason": "notifier not initialized",
-        },
-    )
-    status["alerts"] = alerts_health
-    _absorb(alerts_health.get("status"))
-
     # WebSocket collectors — aggregate WS-client state across all collectors
     ws_health = _safe_subprobe(
         "ws_collectors",

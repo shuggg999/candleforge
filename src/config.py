@@ -114,38 +114,16 @@ class Settings(BaseSettings):
     DEBUG: bool = Field(default=False, env="DEBUG")
     MAX_WEBSOCKET_CONNECTIONS: int = Field(default=1000, env="MAX_WEBSOCKET_CONNECTIONS")
 
-    # Volume Classification (add-volume-classification)
-    CLASSIFICATION_REFRESH_HOURS: int = Field(
-        default=12,
-        env="CLASSIFICATION_REFRESH_HOURS",
-        description="How often the classifier recomputes tier P25/P50/P75 thresholds (hours)",
-    )
-
-    # Volume Detection (add-volume-detection)
-    DETECTION_INTERVAL_MINUTES: int = Field(default=5, env="DETECTION_INTERVAL_MINUTES")
-    DETECTION_THRESHOLDS: str = Field(
-        default="",
-        env="DETECTION_THRESHOLDS",
-        description="Override threshold table; form 'tier:warn,strong,extreme;...'",
-    )
-    DETECTION_BASELINE_HOURS: int = Field(default=24, env="DETECTION_BASELINE_HOURS")
-    DETECTION_CURRENT_MINUTES: int = Field(default=5, env="DETECTION_CURRENT_MINUTES")
-    DETECTION_MIN_SAMPLES: int = Field(default=1200, env="DETECTION_MIN_SAMPLES")
-    BACKFILL_BATCH_RPS: float = Field(default=10.0, env="BACKFILL_BATCH_RPS")
-
     # Network proxy for outbound calls to Binance (REST + WebSocket).
     # Empty = direct connection. For deployments behind a SOCKS5 proxy, set e.g.
     # BINANCE_PROXY_URL=socks5h://host.docker.internal:10808
     BINANCE_PROXY_URL: str = Field(default="", env="BINANCE_PROXY_URL")
 
-    # Telegram Alerts (add-telegram-alerts)
-    TELEGRAM_BOT_TOKEN: str = Field(default="", env="TELEGRAM_BOT_TOKEN")
-    TELEGRAM_CHAT_ID: str = Field(default="", env="TELEGRAM_CHAT_ID")
-    TELEGRAM_PARSE_MODE: str = Field(default="Markdown", env="TELEGRAM_PARSE_MODE")
-    TELEGRAM_PROXY_URL: str = Field(default="", env="TELEGRAM_PROXY_URL")
-    ALERTS_DRY_RUN: bool = Field(default=False, env="ALERTS_DRY_RUN")
-
-    # NATS event bus (introduce-nats-event-bus)
+    # NATS event bus (introduce-nats-event-bus) — data-service publishes K-line
+    # events to subject `ohlcv.{exchange}.{symbol_normalized}.{timeframe}` after
+    # each successful ClickHouse insert. Downstream services (volume-monitor,
+    # telegram-bot) own their own business config; this repo MUST NOT contain
+    # TELEGRAM_*, DETECTION_*, CLASSIFICATION_*, or ALERTS_* settings.
     NATS_URL: str = Field(default="nats://nats:4222", env="NATS_URL")
     NATS_ENABLE: bool = Field(default=True, env="NATS_ENABLE")
     
