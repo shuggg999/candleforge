@@ -5,12 +5,12 @@ TBD - created by archiving change cleanup-baseline-and-lock. Update Purpose afte
 ## Requirements
 ### Requirement: Service Topology
 
-The project SHALL ship a `docker-compose.yml` at repo root that defines exactly three services for the data-service runtime: `clickhouse` (image `clickhouse/clickhouse-server:latest`), `data-service` (built from local `Dockerfile`), and `nats` (image `nats:2.10-alpine` running with JetStream enabled). The compose file MUST NOT depend on any docker network or volume that lives outside this repository or assumes a sibling project is running.
+The project SHALL ship a `docker-compose.yml` at repo root that defines exactly three services for the candleforge runtime: `clickhouse` (image `clickhouse/clickhouse-server:latest`), `candleforge` (built from local `Dockerfile`), and `nats` (image `nats:2.10-alpine` running with JetStream enabled). The compose file MUST NOT depend on any docker network or volume that lives outside this repository or assumes a sibling project is running.
 
 #### Scenario: Compose starts on a fresh checkout
 
 - **WHEN** a developer clones the repo, sets `CLICKHOUSE_DATA_DIR` to a writable absolute path, and runs `docker compose up -d`
-- **THEN** all three containers — `clickhouse`, `nats`, and `data-service` — reach `Up (healthy)` within 90 seconds without referencing any external network or sibling project
+- **THEN** all three containers — `clickhouse`, `nats`, and `candleforge` — reach `Up (healthy)` within 90 seconds without referencing any external network or sibling project
 
 #### Scenario: No phantom external network
 
@@ -38,7 +38,7 @@ The ClickHouse data volume mount path SHALL be parameterized via the `CLICKHOUSE
 
 ### Requirement: Required Environment Variables
 
-The project SHALL declare a `.env.example` file enumerating every environment variable consumed by the data-service runtime, with safe defaults or clear placeholder values. Required keys include: `CLICKHOUSE_HOST`, `CLICKHOUSE_PORT`, `CLICKHOUSE_DATABASE`, `CLICKHOUSE_USER`, `CLICKHOUSE_PASSWORD`, `ENABLED_EXCHANGES`, `LOG_LEVEL`, `RECOVERY_CHECK_INTERVAL`, `MAX_GAP_MINUTES`, `MAX_SYMBOLS_PER_WS_CONNECTION`, `NATS_URL`, `NATS_ENABLE`. The `.env.example` MUST NOT contain Telegram, alert, detection, or classification configuration — those belong in their respective downstream service repos (`telegram-bot/.env.example` and `volume-monitor/.env.example`).
+The project SHALL declare a `.env.example` file enumerating every environment variable consumed by the candleforge runtime, with safe defaults or clear placeholder values. Required keys include: `CLICKHOUSE_HOST`, `CLICKHOUSE_PORT`, `CLICKHOUSE_DATABASE`, `CLICKHOUSE_USER`, `CLICKHOUSE_PASSWORD`, `ENABLED_EXCHANGES`, `LOG_LEVEL`, `RECOVERY_CHECK_INTERVAL`, `MAX_GAP_MINUTES`, `MAX_SYMBOLS_PER_WS_CONNECTION`, `NATS_URL`, `NATS_ENABLE`. The `.env.example` MUST NOT contain Telegram, alert, detection, or classification configuration — those belong in their respective downstream service repos (`telegram-bot/.env.example` and `volume-monitor/.env.example`).
 
 #### Scenario: Operator audits required config
 
@@ -57,12 +57,12 @@ The project SHALL declare a `.env.example` file enumerating every environment va
 
 ### Requirement: Health Check Per Service
 
-Every long-running container in `docker-compose.yml` SHALL declare a `healthcheck` block with a non-trivial probe (HTTP ping, port probe, or domain-specific assertion) and a retry budget. The `data-service` container's healthcheck MUST hit `GET /api/v1/health` and SHALL return success only when ClickHouse connectivity is verified.
+Every long-running container in `docker-compose.yml` SHALL declare a `healthcheck` block with a non-trivial probe (HTTP ping, port probe, or domain-specific assertion) and a retry budget. The `candleforge` container's healthcheck MUST hit `GET /api/v1/health` and SHALL return success only when ClickHouse connectivity is verified.
 
 #### Scenario: Compose refuses to mark unhealthy service as Up
 
-- **WHEN** `data-service` cannot reach ClickHouse
-- **THEN** `docker compose ps` reports the data-service container as `Up (unhealthy)` and `depends_on: condition: service_healthy` in downstream consumers blocks startup
+- **WHEN** `candleforge` cannot reach ClickHouse
+- **THEN** `docker compose ps` reports the candleforge container as `Up (unhealthy)` and `depends_on: condition: service_healthy` in downstream consumers blocks startup
 
 ### Requirement: Code Layout — No Module-Package Collisions
 
@@ -79,7 +79,7 @@ The application entry point (`src/main.py`) SHALL configure log rotation with a 
 
 #### Scenario: Long-running container does not exhaust disk
 
-- **WHEN** the data-service runs continuously for 30 days under normal load
+- **WHEN** the candleforge runs continuously for 30 days under normal load
 - **THEN** total log size under `/app/logs` stays bounded by the configured rotation policy
 
 ### Requirement: Module Wiring Convention
@@ -93,7 +93,7 @@ Modules MUST NOT start background threads or open network sockets at import time
 
 **单一 /health 路由**：所有 `/api/v1/health` 实现 MUST 集中在 `src/main.py` 中的单一 endpoint。`src/api/routes.py` 等 router 文件 MUST NOT 注册同路径的 endpoint —— FastAPI 先注册者优先，重复注册会**静默覆盖** main.py 的实现，使 sub-probe 失效。
 
-**Health sub-probe 完整列表** (本仓 data-service 进程暴露)：`database`, `ws_collectors`, `recovery`, `nats`。`nats` sub-probe shape 详见 `nats-event-bus` capability spec。业务模块 sub-probe（classification / detection / alerts）SHALL NOT 出现在本仓 health body 中 —— 已下线，由独立 `volume-monitor:8200/api/v1/health` 和 `telegram-bot:8300/api/v1/health` 暴露。
+**Health sub-probe 完整列表** (本仓 candleforge 进程暴露)：`database`, `ws_collectors`, `recovery`, `nats`。`nats` sub-probe shape 详见 `nats-event-bus` capability spec。业务模块 sub-probe（classification / detection / alerts）SHALL NOT 出现在本仓 health body 中 —— 已下线，由独立 `volume-monitor:8200/api/v1/health` 和 `telegram-bot:8300/api/v1/health` 暴露。
 
 #### Scenario: Adding a new module surfaces in /health
 

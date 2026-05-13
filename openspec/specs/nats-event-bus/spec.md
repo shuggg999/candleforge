@@ -5,25 +5,25 @@ TBD - created by archiving change introduce-nats-event-bus. Update Purpose after
 ## Requirements
 ### Requirement: NATS Event Bus Sidecar
 
-The data-service runtime SHALL include a `nats` container (image `nats:2.10-alpine` or newer compatible 2.10.x tag) running with JetStream enabled (`-js`), file storage (`-sd /data`), and an HTTP monitoring endpoint (`-m 8222`). The container SHALL be defined in the project's `docker-compose.yml` and SHALL persist its data volume across container restarts.
+The candleforge runtime SHALL include a `nats` container (image `nats:2.10-alpine` or newer compatible 2.10.x tag) running with JetStream enabled (`-js`), file storage (`-sd /data`), and an HTTP monitoring endpoint (`-m 8222`). The container SHALL be defined in the project's `docker-compose.yml` and SHALL persist its data volume across container restarts.
 
-#### Scenario: NATS container starts alongside data-service
+#### Scenario: NATS container starts alongside candleforge
 
 - **WHEN** `docker compose up -d` runs on a fresh checkout with `.env` populated
-- **THEN** a `nats` container reaches `Up (healthy)` within 30 seconds, listens on `4222` (client) and `8222` (monitoring), and `data-service` connects to `nats://nats:4222` during startup
+- **THEN** a `nats` container reaches `Up (healthy)` within 30 seconds, listens on `4222` (client) and `8222` (monitoring), and `candleforge` connects to `nats://nats:4222` during startup
 
 #### Scenario: NATS restart preserves stream history
 
-- **WHEN** `docker compose restart nats` is run while data-service keeps publishing
+- **WHEN** `docker compose restart nats` is run while candleforge keeps publishing
 - **THEN** after the nats container is back up, prior JetStream stream `OHLCV` is still present, holding messages within the configured 24h `MaxAge` window
 
 ### Requirement: JetStream Stream Bootstrap
 
-On data-service startup, the `NatsPublisher` SHALL ensure a JetStream stream named `OHLCV` exists with the following config: subjects `["ohlcv.>"]`, storage `File`, retention `Limits`, `MaxAge` 24 hours, `MaxBytes` 1 GB, replicas 1. Creation MUST be idempotent (stream already exists is not an error).
+On candleforge startup, the `NatsPublisher` SHALL ensure a JetStream stream named `OHLCV` exists with the following config: subjects `["ohlcv.>"]`, storage `File`, retention `Limits`, `MaxAge` 24 hours, `MaxBytes` 1 GB, replicas 1. Creation MUST be idempotent (stream already exists is not an error).
 
 #### Scenario: Stream re-created on first start
 
-- **WHEN** data-service starts on a host where NATS has no `OHLCV` stream
+- **WHEN** candleforge starts on a host where NATS has no `OHLCV` stream
 - **THEN** the publisher calls JetStream `add_stream` once with the documented config, and subsequent restarts find the stream and do not error
 
 #### Scenario: Stream config drift detected
@@ -42,7 +42,7 @@ The NatsPublisher SHALL build the publish subject as `ohlcv.{exchange}.{symbol_n
 
 #### Scenario: Wildcard subscription works as advertised
 
-- **WHEN** a subscriber connects with subject pattern `ohlcv.binance.>` while data-service publishes BTC/USDT 1m and ETH/USDT 5m events
+- **WHEN** a subscriber connects with subject pattern `ohlcv.binance.>` while candleforge publishes BTC/USDT 1m and ETH/USDT 5m events
 - **THEN** the subscriber receives both messages within 1 second of publish
 
 ### Requirement: K-Line Event Payload Schema
@@ -62,7 +62,7 @@ Every published message body SHALL be a UTF-8 encoded JSON object containing exa
 | `trades_count` | integer or null | count of trades in candle |
 | `data_quality` | string | matches ClickHouse `data_quality` (websocket/rest_api/...) |
 | `is_closed` | boolean | true = final/closed candle |
-| `ingested_at` | string | ISO 8601 with timezone, data-service write time |
+| `ingested_at` | string | ISO 8601 with timezone, candleforge write time |
 
 #### Scenario: Subscriber deserializes with Decimal precision
 
@@ -72,7 +72,7 @@ Every published message body SHALL be a UTF-8 encoded JSON object containing exa
 #### Scenario: Schema version surfaced for compatibility
 
 - **WHEN** a subscriber reads `payload["schema_version"]`
-- **THEN** it returns integer `1` for all messages produced by data-service in this iteration; subscribers can branch on this value when future versions add/remove fields
+- **THEN** it returns integer `1` for all messages produced by candleforge in this iteration; subscribers can branch on this value when future versions add/remove fields
 
 ### Requirement: Publish Semantics — Fire-and-Forget After Persistence
 
@@ -80,7 +80,7 @@ The NatsPublisher's `publish_kline(row)` SHALL be invoked AFTER the correspondin
 
 #### Scenario: NATS container down during steady-state
 
-- **WHEN** `docker compose stop nats` is invoked while data-service keeps receiving WS frames
+- **WHEN** `docker compose stop nats` is invoked while candleforge keeps receiving WS frames
 - **THEN** ClickHouse inserts continue to succeed without exception, the `nats` sub-probe in `/api/v1/health` reports `status: "degraded"` with `connected: false`, and `publish_failure_count` grows monotonically
 
 #### Scenario: NATS recovers after outage
@@ -90,12 +90,12 @@ The NatsPublisher's `publish_kline(row)` SHALL be invoked AFTER the correspondin
 
 #### Scenario: Publish disabled via env
 
-- **WHEN** operator sets `NATS_ENABLE=false` in `.env` and restarts data-service
+- **WHEN** operator sets `NATS_ENABLE=false` in `.env` and restarts candleforge
 - **THEN** the publisher is a no-op: `nc.connect` is never called, `publish_kline` returns immediately, and the `nats` sub-probe reports `status: "ok"` with `connected: false`, `disabled: true`
 
 ### Requirement: NATS Sub-Probe on /api/v1/health
 
-The data-service `/api/v1/health` endpoint SHALL include a `nats` sub-probe in `body.details` with the following shape:
+The candleforge `/api/v1/health` endpoint SHALL include a `nats` sub-probe in `body.details` with the following shape:
 
 ```json
 {
@@ -115,7 +115,7 @@ The data-service `/api/v1/health` endpoint SHALL include a `nats` sub-probe in `
 
 #### Scenario: Stable operation reports ok
 
-- **WHEN** data-service has been publishing K-lines for 5 minutes with no errors
+- **WHEN** candleforge has been publishing K-lines for 5 minutes with no errors
 - **THEN** `body.details.nats.status` is `"ok"`, `connected: true`, `publish_failure_count: 0`, `last_publish_age_seconds < 60`
 
 #### Scenario: Connection lost reports degraded

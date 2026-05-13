@@ -119,7 +119,7 @@ class CompactOHLCVPool:
 
 ```yaml
 services:
-  data-service:
+  candleforge:
     environment:
       - HTTP_PROXY=http://172.30.0.2:8118
       - HTTPS_PROXY=http://172.30.0.2:8118
@@ -180,7 +180,7 @@ logger.add(
     ├── Database/
     │   └── clickhouse/         # ClickHouse数据
     ├── Logs/
-    │   └── data-service/       # 服务日志
+    │   └── candleforge/       # 服务日志
     └── Backups/                # 备份目录
 ```
 
@@ -206,7 +206,7 @@ logger.add(
 ```bash
 # Docker容器状态
 CONTAINER         CPU %   MEM USAGE    MEM %
-data-service      0.8%    127.2MiB     0.4%
+candleforge      0.8%    127.2MiB     0.4%
 clickhouse-db     1.2%    458.3MiB     1.5%
 
 # 数据统计
@@ -262,7 +262,7 @@ curl http://localhost:8000/api/v1/health
 docker stats --no-stream
 
 # 日志查看
-docker compose logs -f data-service
+docker compose logs -f candleforge
 
 # 数据库状态
 curl http://localhost:8123/ping

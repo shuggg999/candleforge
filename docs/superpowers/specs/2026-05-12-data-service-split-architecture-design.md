@@ -1,4 +1,4 @@
-# 架构重新定位：data-service 转为纯中转数据库 + 业务层拆出
+# 架构重新定位：candleforge 转为纯中转数据库 + 业务层拆出
 
 **日期**: 2026-05-12
 **作者**: project maintainer + Claude
@@ -20,11 +20,11 @@
 
 | 角色 | 职责 | 不做 |
 |---|---|---|
-| **data-service** (本仓库) | 多交易所 WS 实时采集 + REST gap recovery + ClickHouse 持久化 + 查询 API + MQ event publish | 业务规则计算、告警决策、通知投递 |
+| **candleforge** (本仓库) | 多交易所 WS 实时采集 + REST gap recovery + ClickHouse 持久化 + 查询 API + MQ event publish | 业务规则计算、告警决策、通知投递 |
 | **volume-monitor** (新 repo) | 订阅 MQ event → 触发 5min 检测 cycle → SQL 查 ClickHouse 算 baseline → 产生 alert event | 数据采集、数据存储、消息投递 |
 | **telegram-bot** (新 repo) | HTTP webhook 接收上游 alert event → 调 Telegram API 发消息 → 处理 429 / 退避 | 业务决策、数据查询 |
 
-**生效约束**：未来任何"基于这些数据做某件事"的需求（其他策略服务、行情面板、回测分析、新告警维度），都**不允许往 data-service 里塞**，必须作为下游消费者新起服务。
+**生效约束**：未来任何"基于这些数据做某件事"的需求（其他策略服务、行情面板、回测分析、新告警维度），都**不允许往 candleforge 里塞**，必须作为下游消费者新起服务。
 
 ---
 
@@ -32,7 +32,7 @@
 
 ```
 ┌─────────────────────┐
-│   data-service      │
+│   candleforge      │
 │  (this repo)        │
 │                     │
 │  WS:                │
@@ -63,8 +63,8 @@
 ```
 
 **两层职责**：
-- **MQ 通知层（NATS）**：data-service 入库一条 → publish 一次。下游决定何时反应。
-- **SQL 查询层（ClickHouse）**：下游算 baseline / 复杂聚合时直查表。schema 由 data-service 公开作为契约。
+- **MQ 通知层（NATS）**：candleforge 入库一条 → publish 一次。下游决定何时反应。
+- **SQL 查询层（ClickHouse）**：下游算 baseline / 复杂聚合时直查表。schema 由 candleforge 公开作为契约。
 
 **为什么不只用 MQ？** detection 需要 24h baseline，纯 MQ 推送不存历史，下游会被迫自己再做一份历史副本，浪费。
 
@@ -102,7 +102,7 @@
 ```
 
 - `is_closed=true` 表示 K 线已收盘（WS final frame）；recovery 补的也是 closed
-- `ingested_at` data-service 写入时间，便于下游计算延迟
+- `ingested_at` candleforge 写入时间，便于下游计算延迟
 
 **保留策略**：JetStream 持久化 24h（足以支持下游短暂离线后追平）
 
@@ -124,7 +124,7 @@
 
 不一次性 cut over，分四阶段：
 
-### 阶段 1：data-service 内部修小 bug（不阻塞重构）
+### 阶段 1：candleforge 内部修小 bug（不阻塞重构）
 - 修 init.sql TTL bug（1h 90天 → 365天）+ ALTER TABLE 修现有表
 - 补 `/api/v1/health` sub-probe（classifier/detector/notifier 状态）
 - 删 CLAUDE.md 里 `/dashboard` stale 描述
@@ -136,7 +136,7 @@
 - 现有 5min 检测和 telegram alert **继续工作**，不影响生产
 - OpenSpec change: `deprecate-business-modules`
 
-### 阶段 3：data-service 加 NATS event bus
+### 阶段 3：candleforge 加 NATS event bus
 - docker-compose 加 nats 服务
 - 入库后 publish event
 - 公开 event schema 文档 + Python type stub
@@ -146,13 +146,13 @@
 - 新建 `volume-monitor` repo（订阅 NATS + SQL + 检测 + alert event）
 - 新建 `telegram-bot` repo（HTTP webhook → Telegram）
 - 部署：生产 host 的 docker compose 加这两个服务
-- 验证：与 data-service 内部业务模块**双跑对比**几天，证明 monitor 行为一致
+- 验证：与 candleforge 内部业务模块**双跑对比**几天，证明 monitor 行为一致
 
-### 阶段 5：data-service 清理
+### 阶段 5：candleforge 清理
 - 外部 monitor + bot 稳定运行 ≥ 3 天后
 - `git rm src/{classification,detection,alerts}/`
 - 删 `src/main.py` 里的 wiring（classifier / detector / notifier / scheduler 任务）
-- 关闭 data-service 的 5min cron
+- 关闭 candleforge 的 5min cron
 - OpenSpec change: `cleanup-business-modules`
 
 ---
@@ -199,7 +199,7 @@ ClickHouse partition by month + TTL 自动 drop，无需运维干预。贾维斯
 | 拆分期间业务功能中断 | 阶段 2 标 deprecated 不删；阶段 4 双跑对比 |
 | MQ 引入运维复杂度 | NATS 单二进制 docker image，无 Zookeeper / 不需额外组件 |
 | 跨 repo 协作慢 | 三个 repo 都用同一个 gitea 实例 + 同一份 docker-compose.yml 在部署 repo 里编排 |
-| schema 改动协调 | event schema 写在 data-service repo 的 `docs/contracts/`，下游 import 时 vendor / 复制 |
+| schema 改动协调 | event schema 写在 candleforge repo 的 `docs/contracts/`，下游 import 时 vendor / 复制 |
 
 **已决（不再讨论）**：
 - ✅ 业务层严格分离（A 选项）

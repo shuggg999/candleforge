@@ -119,7 +119,7 @@ class Settings(BaseSettings):
     # BINANCE_PROXY_URL=socks5h://host.docker.internal:10808
     BINANCE_PROXY_URL: str = Field(default="", env="BINANCE_PROXY_URL")
 
-    # NATS event bus (introduce-nats-event-bus) — data-service publishes K-line
+    # NATS event bus (introduce-nats-event-bus) — candleforge publishes K-line
     # events to subject `ohlcv.{exchange}.{symbol_normalized}.{timeframe}` after
     # each successful ClickHouse insert. Downstream services (volume-monitor,
     # telegram-bot) own their own business config; this repo MUST NOT contain

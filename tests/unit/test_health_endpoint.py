@@ -124,7 +124,7 @@ def test_health_no_business_module_subprobes():
     details = body.get("details", {})
     leaked = set(details.keys()) & {"classification", "detection", "alerts"}
     assert not leaked, (
-        f"data-service /health MUST NOT expose business module sub-probes after "
+        f"candleforge /health MUST NOT expose business module sub-probes after "
         f"cleanup-business-modules; leaked: {sorted(leaked)}"
     )
 

@@ -86,10 +86,10 @@ def restart_data_service():
     """重启数据收集服务"""
     print("🚀 重启数据收集服务...")
     print("请手动执行以下命令:")
-    print("docker-compose restart data-service")
+    print("docker-compose restart candleforge")
     print()
     print("或者在容器内重启应用:")
-    print("docker exec data-service pkill -f 'python -m src.main'")
+    print("docker exec candleforge pkill -f 'python -m src.main'")
 
 async def main():
     print("=" * 50)
@@ -120,7 +120,7 @@ async def main():
     print("✅ 修复完成！")
     print()
     print("📝 后续步骤:")
-    print("1. 重启data-service容器")
+    print("1. 重启candleforge容器")
     print("2. 等待5-10分钟收集新数据")
     print("3. 验证数据格式正确性")
     print("4. 测试Freqtrade集成")

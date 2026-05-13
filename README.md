@@ -74,7 +74,7 @@ cp .env.example .env
 docker compose up -d
 ```
 
-Three containers come up: `clickhouse-db`, `nats`, `data-service`.
+Three containers come up: `clickhouse-db`, `nats`, `candleforge`.
 
 ### Verify
 

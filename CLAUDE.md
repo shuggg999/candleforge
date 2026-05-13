@@ -51,7 +51,7 @@ black src/
 docker-compose up -d
 
 # View logs
-docker-compose logs -f data-service
+docker-compose logs -f candleforge
 docker-compose logs -f clickhouse
 
 # Restart services
@@ -146,7 +146,7 @@ Partitioned by month, ordered by (exchange, symbol, timeframe, timestamp).
 
 ### Log Locations
 - Application logs: `logs/data_service.log` (rotated daily)
-- Docker logs: `docker-compose logs data-service`
+- Docker logs: `docker-compose logs candleforge`
 - Monitor script: `logs/monitor.log`
 
 ### Health Monitoring
