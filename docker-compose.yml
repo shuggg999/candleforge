@@ -1,3 +1,9 @@
+name: candleforge
+# Pin compose project name (and therefore the `<project>_default` docker network
+# name) so it doesn't drift with directory renames. Sibling services
+# (volume-monitor, telegram-bot) reference `external: name: candleforge_default`
+# — keep this in sync if you change the project name here.
+
 services:
   nats:
     # NATS event bus with JetStream (introduce-nats-event-bus). Downstream

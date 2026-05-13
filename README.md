@@ -1,4 +1,4 @@
-# freqtrade-data-service
+# candleforge
 
 > Pure data relay for cryptocurrency perpetual-futures K-line data.
 > WebSocket collect → ClickHouse persist → NATS publish.
@@ -25,7 +25,7 @@ It deliberately holds **no business logic** — no detection, no alerting, no th
                          │
                          ▼
         ┌─────────────────────────────────────┐
-        │     freqtrade-data-service          │  ← this repo
+        │     candleforge          │  ← this repo
         │   ┌──────────────────────────────┐  │
         │   │  WS collector (asyncio)      │  │
         │   │  REST recovery (gap fill)    │  │
@@ -67,8 +67,8 @@ These run as separate processes, subscribe to the same NATS bus, and own all bus
 ### Run
 
 ```bash
-git clone https://github.com/shuggg999/freqtrade-data-service.git
-cd freqtrade-data-service
+git clone https://github.com/shuggg999/candleforge.git
+cd candleforge
 cp .env.example .env
 # edit .env if you need to override CLICKHOUSE_DATA_DIR or set BINANCE_PROXY_URL
 docker compose up -d
@@ -120,7 +120,7 @@ Full spec: `openspec/specs/nats-event-bus/spec.md`.
 Subscribe with `nats sub` to sanity-check:
 
 ```bash
-docker run --rm --network freqtrade-data-service_default natsio/nats-box \
+docker run --rm --network candleforge_default natsio/nats-box \
   nats -s nats://nats:4222 sub 'ohlcv.binance.BTCUSDT.>'
 ```
 
@@ -185,7 +185,7 @@ openspec/
 ```bash
 # Conda env
 conda env create -f environment.yml
-conda activate freqtrade-data-service
+conda activate candleforge
 
 # Or pip
 pip install -r requirements.txt

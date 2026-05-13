@@ -1,4 +1,4 @@
-name: freqtrade-data-service
+name: candleforge
 channels:
   - conda-forge
   - defaults

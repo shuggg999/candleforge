@@ -8,7 +8,7 @@
 
 ## 1. 起源
 
-2026-05-10 / 11 用三个 OpenSpec change 把 volume classification + detection + telegram alerts 全部塞进 `freqtrade-data-service` 里实现并上线。功能跑通后用户复盘提出：
+2026-05-10 / 11 用三个 OpenSpec change 把 volume classification + detection + telegram alerts 全部塞进 `candleforge` 里实现并上线。功能跑通后用户复盘提出：
 
 > "我想把它定义为一个中转的数据库的服务。后续比如说警报、监控成交量、发送警报这些东西都可以用中间组件来进行组装，而不是写在一起。"
 
@@ -112,7 +112,7 @@
 
 | Repo | 现状 | 内容 |
 |---|---|---|
-| `freqtrade-data-service` (当前) | 现存 | collectors, storage, recovery, API, NATS publisher。**未来不允许新增业务逻辑** |
+| `candleforge` (当前) | 现存 | collectors, storage, recovery, API, NATS publisher。**未来不允许新增业务逻辑** |
 | `volume-monitor` (新建) | TBD | classifier, detector, alert event producer。订阅 NATS + SQL 查 ClickHouse |
 | `telegram-bot` (新建，可选合并到 monitor) | TBD | HTTP webhook → Telegram API。轻量中间件，未来其他服务也可以调 |
 

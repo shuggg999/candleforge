@@ -170,7 +170,7 @@ logger.add(
 ### 4.1 新目录结构
 ```
 /Volumes/磁盘/Projects/
-├── freqtrade-data-service/     # 项目代码
+├── candleforge/     # 项目代码
 │   ├── src/                    # 源代码
 │   ├── config/                 # 配置文件
 │   ├── docs/                   # 文档
@@ -249,7 +249,7 @@ cd /Volumes/磁盘/Projects/docker-vpn-gateway
 docker compose up -d
 
 # 2. 启动数据服务
-cd /Volumes/磁盘/Projects/freqtrade-data-service
+cd /Volumes/磁盘/Projects/candleforge
 docker compose up -d
 
 # 3. 验证服务

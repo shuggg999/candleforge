@@ -15,7 +15,7 @@ This is a cryptocurrency futures data service that provides high-quality OHLCV d
 
 # Or manually:
 conda env create -f environment.yml
-conda activate freqtrade-data-service
+conda activate candleforge
 ```
 
 ### Running the Service

@@ -16,7 +16,7 @@ COPY environment.yml .
 RUN conda env create -f environment.yml
 
 # Make RUN commands use the new environment
-SHELL ["conda", "run", "-n", "freqtrade-data-service", "/bin/bash", "-c"]
+SHELL ["conda", "run", "-n", "candleforge", "/bin/bash", "-c"]
 
 # Upgrade websockets to 14+ (proxy= kwarg) + python-socks[asyncio] (SOCKS5 backend).
 # Without python-socks the proxy kwarg falls through to asyncio.create_connection
@@ -42,4 +42,4 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
     CMD curl -f http://localhost:8000/api/v1/health || exit 1
 
 # Run the application with conda
-CMD ["conda", "run", "--no-capture-output", "-n", "freqtrade-data-service", "python", "-m", "src.main"]
+CMD ["conda", "run", "--no-capture-output", "-n", "candleforge", "python", "-m", "src.main"]

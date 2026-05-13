@@ -1,5 +1,5 @@
 # 数据获取服务架构改进方案
-## 基于 Qlib 专业实践的 freqtrade-data-service 优化
+## 基于 Qlib 专业实践的 candleforge 优化
 
 ---
 
@@ -93,7 +93,7 @@ def save_instrument(self, symbol, df: pd.DataFrame):
 
 ## 二、现有架构对比分析
 
-### 2.1 freqtrade-data-service 现状
+### 2.1 candleforge 现状
 
 #### 当前架构：
 ```
@@ -123,7 +123,7 @@ src/
 
 ### 2.2 核心差距分析
 
-| 维度 | freqtrade-data-service | Qlib Collector | 差距程度 |
+| 维度 | candleforge | Qlib Collector | 差距程度 |
 |------|------------------------|----------------|----------|
 | **架构设计** | 各自为政的收集器 | 统一抽象基类 | 🔴 大 |
 | **重试机制** | 简单重试 | 装饰器+指数退避 | 🟡 中 |
@@ -917,7 +917,7 @@ concurrent_requests = Gauge('concurrent_requests_current', 'Current concurrent r
 ## 六、总结
 
 ### 6.1 核心价值
-通过借鉴Qlib的专业架构设计，freqtrade-data-service将获得：
+通过借鉴Qlib的专业架构设计，candleforge将获得：
 
 1. **专业可靠性**：工业级的重试、验证、容错机制
 2. **优雅扩展性**：新增交易所无需修改核心代码
